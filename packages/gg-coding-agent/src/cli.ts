@@ -263,10 +263,15 @@ async function runInkTUI(opts: {
     sessionPath = session.path;
   }
 
+  // Server-side tools (Anthropic only)
+  const serverTools =
+    provider === "anthropic" ? [{ type: "web_search_20250305", name: "web_search" }] : undefined;
+
   await renderApp({
     provider,
     model,
     tools,
+    serverTools,
     messages,
     version: CLI_VERSION,
     maxTokens: 16384,

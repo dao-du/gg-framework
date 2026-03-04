@@ -63,6 +63,15 @@ export function toAnthropicMessages(messages: Message[]): {
                   name: part.name,
                   input: part.args,
                 };
+              if (part.type === "server_tool_call")
+                return {
+                  type: "server_tool_use",
+                  id: part.id,
+                  name: part.name,
+                  input: part.input,
+                } as unknown as Anthropic.ContentBlockParam;
+              if (part.type === "server_tool_result")
+                return part.data as unknown as Anthropic.ContentBlockParam;
               // image content shouldn't appear in assistant messages
               return { type: "text", text: "" };
             });

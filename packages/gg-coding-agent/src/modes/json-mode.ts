@@ -58,6 +58,12 @@ export async function runJsonMode(options: JsonModeOptions): Promise<void> {
   session.eventBus.on("agent_done", (payload) => {
     emitJson({ type: "agent_done", ...payload });
   });
+  session.eventBus.on("server_tool_call", (payload) => {
+    emitJson({ type: "server_tool_call", ...payload });
+  });
+  session.eventBus.on("server_tool_result", (payload) => {
+    emitJson({ type: "server_tool_result", ...payload });
+  });
   session.eventBus.on("error", ({ error }) => {
     emitJson({ type: "error", message: error.message });
   });

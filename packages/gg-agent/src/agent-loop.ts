@@ -68,6 +68,7 @@ export async function* agentLoop(
         model: options.model,
         messages,
         tools: options.tools,
+        serverTools: options.serverTools,
         maxTokens: options.maxTokens,
         temperature: options.temperature,
         thinking: options.thinking,
@@ -86,6 +87,20 @@ export async function* agentLoop(
           yield { type: "text_delta" as const, text: event.text };
         } else if (event.type === "thinking_delta") {
           yield { type: "thinking_delta" as const, text: event.text };
+        } else if (event.type === "server_toolcall") {
+          yield {
+            type: "server_tool_call" as const,
+            id: event.id,
+            name: event.name,
+            input: event.input,
+          };
+        } else if (event.type === "server_toolresult") {
+          yield {
+            type: "server_tool_result" as const,
+            toolUseId: event.toolUseId,
+            resultType: event.resultType,
+            data: event.data,
+          };
         }
       }
 

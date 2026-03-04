@@ -40,7 +40,27 @@ export interface ToolResult {
   isError?: boolean;
 }
 
-export type ContentPart = TextContent | ThinkingContent | ImageContent | ToolCall;
+export interface ServerToolCall {
+  type: "server_tool_call";
+  id: string;
+  name: string;
+  input: unknown;
+}
+
+export interface ServerToolResult {
+  type: "server_tool_result";
+  toolUseId: string;
+  resultType: string;
+  data: unknown;
+}
+
+export type ContentPart =
+  | TextContent
+  | ThinkingContent
+  | ImageContent
+  | ToolCall
+  | ServerToolCall
+  | ServerToolResult;
 
 // ── Messages ───────────────────────────────────────────────
 
@@ -75,6 +95,14 @@ export interface Tool {
 }
 
 export type ToolChoice = "auto" | "none" | "required" | { name: string };
+
+// ── Server Tools ────────────────────────────────────────────
+
+export interface ServerToolDefinition {
+  type: string;
+  name: string;
+  [key: string]: unknown;
+}
 
 // ── Stream Events ──────────────────────────────────────────
 
@@ -112,11 +140,27 @@ export interface ErrorEvent {
   error: Error;
 }
 
+export interface ServerToolCallEvent {
+  type: "server_toolcall";
+  id: string;
+  name: string;
+  input: unknown;
+}
+
+export interface ServerToolResultEvent {
+  type: "server_toolresult";
+  toolUseId: string;
+  resultType: string;
+  data: unknown;
+}
+
 export type StreamEvent =
   | TextDeltaEvent
   | ThinkingDeltaEvent
   | ToolCallDeltaEvent
   | ToolCallDoneEvent
+  | ServerToolCallEvent
+  | ServerToolResultEvent
   | DoneEvent
   | ErrorEvent;
 
@@ -135,6 +179,7 @@ export interface StreamResponse {
 export interface Usage {
   inputTokens: number;
   outputTokens: number;
+  serverToolUse?: { webSearchRequests?: number; webFetchRequests?: number };
 }
 
 // ── Stream Options ─────────────────────────────────────────
@@ -145,6 +190,7 @@ export interface StreamOptions {
   messages: Message[];
   tools?: Tool[];
   toolChoice?: ToolChoice;
+  serverTools?: ServerToolDefinition[];
   maxTokens?: number;
   temperature?: number;
   topP?: number;

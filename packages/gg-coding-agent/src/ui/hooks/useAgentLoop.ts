@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { agentLoop, type AgentEvent, type AgentTool } from "@kenkaiiii/gg-agent";
-import type { Message, Provider, ThinkingLevel } from "@kenkaiiii/gg-ai";
+import type { Message, Provider, ServerToolDefinition, ThinkingLevel } from "@kenkaiiii/gg-ai";
 
 export interface ActiveToolCall {
   toolCallId: string;
@@ -14,6 +14,7 @@ export interface AgentLoopOptions {
   provider: Provider;
   model: string;
   tools: AgentTool[];
+  serverTools?: ServerToolDefinition[];
   maxTokens: number;
   thinking?: ThinkingLevel;
   apiKey?: string;
@@ -59,6 +60,8 @@ export function useAgentLoop(
       durationMs: number,
       details?: unknown,
     ) => void;
+    onServerToolCall?: (id: string, name: string, input: unknown) => void;
+    onServerToolResult?: (toolUseId: string, resultType: string, data: unknown) => void;
     onDone?: (durationMs: number, toolsUsed: string[]) => void;
     onAborted?: () => void;
   },
@@ -68,6 +71,8 @@ export function useAgentLoop(
   const onToolStart = callbacks?.onToolStart;
   const onToolUpdate = callbacks?.onToolUpdate;
   const onToolEnd = callbacks?.onToolEnd;
+  const onServerToolCall = callbacks?.onServerToolCall;
+  const onServerToolResult = callbacks?.onServerToolResult;
   const onDone = callbacks?.onDone;
   const onAborted = callbacks?.onAborted;
   const [isRunning, setIsRunning] = useState(false);
@@ -216,6 +221,7 @@ export function useAgentLoop(
           provider: options.provider,
           model: options.model,
           tools: options.tools,
+          serverTools: options.serverTools,
           maxTokens: options.maxTokens,
           thinking: options.thinking,
           apiKey: options.apiKey,
@@ -300,6 +306,14 @@ export function useAgentLoop(
               break;
             }
 
+            case "server_tool_call":
+              onServerToolCall?.(event.id, event.name, event.input);
+              break;
+
+            case "server_tool_result":
+              onServerToolResult?.(event.toolUseId, event.resultType, event.data);
+              break;
+
             case "turn_end":
               setCurrentTurn(event.turn);
               setTotalTokens((prev) => ({
@@ -372,6 +386,8 @@ export function useAgentLoop(
       onToolStart,
       onToolUpdate,
       onToolEnd,
+      onServerToolCall,
+      onServerToolResult,
       onDone,
       onAborted,
       startReveal,

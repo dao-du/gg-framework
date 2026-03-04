@@ -1,5 +1,12 @@
 import Anthropic from "@anthropic-ai/sdk";
-import type { ContentPart, StreamOptions, StreamResponse, ToolCall } from "../types.js";
+import type {
+  ContentPart,
+  ServerToolCall,
+  ServerToolResult,
+  StreamOptions,
+  StreamResponse,
+  ToolCall,
+} from "../types.js";
 import { ProviderError } from "../errors.js";
 import { StreamResult } from "../utils/event-stream.js";
 import {
@@ -18,12 +25,16 @@ export function streamAnthropic(options: StreamOptions): StreamResult {
 
 async function runStream(options: StreamOptions, result: StreamResult): Promise<void> {
   const isOAuth = options.apiKey?.startsWith("sk-ant-oat");
+
   const client = new Anthropic({
     ...(isOAuth
-      ? { apiKey: null as unknown as string, authToken: options.apiKey }
+      ? {
+          apiKey: null as unknown as string,
+          authToken: options.apiKey,
+          defaultHeaders: { "anthropic-beta": "oauth-2025-04-20" },
+        }
       : { apiKey: options.apiKey }),
     ...(options.baseUrl ? { baseURL: options.baseUrl } : {}),
-    ...(isOAuth ? { defaultHeaders: { "anthropic-beta": "oauth-2025-04-20" } } : {}),
   });
 
   const { system, messages } = toAnthropicMessages(options.messages);
@@ -46,7 +57,14 @@ async function runStream(options: StreamOptions, result: StreamResult): Promise<
     ...(options.temperature != null && !thinking ? { temperature: options.temperature } : {}),
     ...(options.topP != null ? { top_p: options.topP } : {}),
     ...(options.stop ? { stop_sequences: options.stop } : {}),
-    ...(options.tools?.length ? { tools: toAnthropicTools(options.tools) } : {}),
+    ...(options.tools?.length || options.serverTools?.length
+      ? {
+          tools: [
+            ...(options.tools?.length ? toAnthropicTools(options.tools) : []),
+            ...(options.serverTools ?? []),
+          ] as Anthropic.MessageCreateParams["tools"],
+        }
+      : {}),
     ...(options.toolChoice && options.tools?.length
       ? { tool_choice: toAnthropicToolChoice(options.toolChoice) }
       : {}),
@@ -71,10 +89,17 @@ async function runStream(options: StreamOptions, result: StreamResult): Promise<
   });
 
   stream.on("streamEvent", (event) => {
-    // When a new tool_use content block starts, capture its id and name
-    if (event.type === "content_block_start" && event.content_block.type === "tool_use") {
-      currentToolId = event.content_block.id;
-      currentToolName = event.content_block.name;
+    if (event.type === "content_block_start") {
+      // When a new tool_use content block starts, capture its id and name
+      if (event.content_block.type === "tool_use") {
+        currentToolId = event.content_block.id;
+        currentToolName = event.content_block.name;
+      }
+      // Track server_tool_use blocks
+      if (event.content_block.type === "server_tool_use") {
+        currentToolId = event.content_block.id;
+        currentToolName = event.content_block.name;
+      }
     }
   });
 
@@ -106,6 +131,39 @@ async function runStream(options: StreamOptions, result: StreamResult): Promise<
         name: tc.name,
         args: tc.args,
       });
+    } else if (block.type === "server_tool_use") {
+      const stc: ServerToolCall = {
+        type: "server_tool_call",
+        id: block.id,
+        name: block.name,
+        input: block.input,
+      };
+      contentParts.push(stc);
+      result.push({
+        type: "server_toolcall",
+        id: stc.id,
+        name: stc.name,
+        input: stc.input,
+      });
+    } else {
+      // Handle result blocks (web_search_tool_result)
+      const raw = block as unknown as Record<string, unknown>;
+      const blockType = raw.type as string;
+      if (blockType === "web_search_tool_result") {
+        const str: ServerToolResult = {
+          type: "server_tool_result",
+          toolUseId: raw.tool_use_id as string,
+          resultType: blockType,
+          data: raw,
+        };
+        contentParts.push(str);
+        result.push({
+          type: "server_toolresult",
+          toolUseId: str.toolUseId,
+          resultType: str.resultType,
+          data: str.data,
+        });
+      }
     }
   });
 

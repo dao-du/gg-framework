@@ -17,6 +17,10 @@ export interface BusEventMap {
   agent_done: { totalTurns: number; totalUsage: { inputTokens: number; outputTokens: number } };
   error: { error: Error };
 
+  // Server tool events
+  server_tool_call: { id: string; name: string; input: unknown };
+  server_tool_result: { toolUseId: string; resultType: string; data: unknown };
+
   // Session lifecycle
   session_start: { sessionId: string };
   model_change: { provider: string; model: string };
@@ -105,6 +109,20 @@ export class EventBus {
         this.emit("agent_done", {
           totalTurns: event.totalTurns,
           totalUsage: event.totalUsage,
+        });
+        break;
+      case "server_tool_call":
+        this.emit("server_tool_call", {
+          id: event.id,
+          name: event.name,
+          input: event.input,
+        });
+        break;
+      case "server_tool_result":
+        this.emit("server_tool_result", {
+          toolUseId: event.toolUseId,
+          resultType: event.resultType,
+          data: event.data,
         });
         break;
       case "error":

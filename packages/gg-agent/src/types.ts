@@ -3,6 +3,7 @@ import type {
   Tool,
   AssistantMessage,
   Message,
+  ServerToolDefinition,
   StopReason,
   Usage,
   StreamOptions,
@@ -87,12 +88,28 @@ export interface AgentErrorEvent {
   error: Error;
 }
 
+export interface AgentServerToolCallEvent {
+  type: "server_tool_call";
+  id: string;
+  name: string;
+  input: unknown;
+}
+
+export interface AgentServerToolResultEvent {
+  type: "server_tool_result";
+  toolUseId: string;
+  resultType: string;
+  data: unknown;
+}
+
 export type AgentEvent =
   | AgentTextDeltaEvent
   | AgentThinkingDeltaEvent
   | AgentToolCallStartEvent
   | AgentToolCallUpdateEvent
   | AgentToolCallEndEvent
+  | AgentServerToolCallEvent
+  | AgentServerToolResultEvent
   | AgentTurnEndEvent
   | AgentDoneEvent
   | AgentErrorEvent;
@@ -104,6 +121,7 @@ export interface AgentOptions {
   model: string;
   system?: string;
   tools?: AgentTool[];
+  serverTools?: ServerToolDefinition[];
   maxTurns?: number;
   maxTokens?: number;
   temperature?: number;

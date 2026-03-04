@@ -7,6 +7,7 @@ import { createFindTool } from "./find.js";
 import { createGrepTool } from "./grep.js";
 import { createLsTool } from "./ls.js";
 import { createSubAgentTool } from "./subagent.js";
+import { createWebFetchTool } from "./web-fetch.js";
 import type { AgentDefinition } from "../core/agents.js";
 
 export interface CreateToolsOptions {
@@ -25,6 +26,7 @@ export function createTools(cwd: string, opts?: CreateToolsOptions): AgentTool[]
     createFindTool(cwd),
     createGrepTool(cwd),
     createLsTool(cwd),
+    createWebFetchTool(),
   ];
 
   if (opts?.agents && opts.agents.length > 0 && opts.provider && opts.model) {
@@ -41,3 +43,4 @@ export { createBashTool } from "./bash.js";
 export { createFindTool } from "./find.js";
 export { createGrepTool } from "./grep.js";
 export { createLsTool } from "./ls.js";
+export { createWebFetchTool } from "./web-fetch.js";

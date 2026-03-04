@@ -13,6 +13,8 @@ export type {
   AgentToolCallStartEvent,
   AgentToolCallUpdateEvent,
   AgentToolCallEndEvent,
+  AgentServerToolCallEvent,
+  AgentServerToolResultEvent,
   AgentTurnEndEvent,
   AgentDoneEvent,
   AgentErrorEvent,

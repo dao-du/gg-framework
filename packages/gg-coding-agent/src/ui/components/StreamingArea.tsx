@@ -34,7 +34,7 @@ export function StreamingArea({
         <Box flexShrink={1}>
           <Text color={theme.primary}>{"⏺ "}</Text>
           <Box flexDirection="column" flexGrow={1} flexShrink={1} flexBasis={0}>
-            <Markdown>{streamingText}</Markdown>
+            <Markdown>{streamingText.trimStart()}</Markdown>
           </Box>
         </Box>
       )}

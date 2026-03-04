@@ -150,6 +150,11 @@ function getToolHeaderParts(
       const trunc = task.length > 50 ? task.slice(0, 47) + "…" : task;
       return { label: displayName, detail: trunc };
     }
+    case "web_fetch": {
+      const url = String(args.url ?? "");
+      const trunc = url.length > 60 ? url.slice(0, 57) + "…" : url;
+      return { label: displayName, detail: trunc };
+    }
     default:
       return { label: displayName, detail: "" };
   }
@@ -173,6 +178,8 @@ function toolDisplayName(name: string): string {
       return "List";
     case "subagent":
       return "Agent";
+    case "web_fetch":
+      return "Fetch";
     default:
       return name.charAt(0).toUpperCase() + name.slice(1);
   }
@@ -200,6 +207,11 @@ function getInlineSummary(name: string, result: string, isError: boolean): strin
     }
     case "subagent":
       return "completed";
+    case "web_fetch": {
+      const lines = result.split("\n").filter((l) => l.length > 0);
+      if (result.startsWith("Error")) return result.split("\n")[0];
+      return `${lines.length} line${lines.length !== 1 ? "s" : ""}`;
+    }
     default:
       return "";
   }
@@ -395,6 +407,19 @@ function buildResultBody(
         )),
         totalLines: lines.length,
       };
+    }
+    case "web_fetch": {
+      if (result.startsWith("Error")) {
+        return {
+          lines: [
+            <Text key={0} color="#f87171">
+              {result.split("\n")[0]}
+            </Text>,
+          ],
+          totalLines: 1,
+        };
+      }
+      return null; // compact display with inline summary
     }
     default:
       return null;

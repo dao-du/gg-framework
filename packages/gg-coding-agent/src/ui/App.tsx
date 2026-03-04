@@ -1,12 +1,13 @@
 import React, { useState, useRef, useCallback, useEffect } from "react";
 import { Box, Text, Static, useStdout } from "ink";
 import crypto from "node:crypto";
-import type { Message, Provider, ThinkingLevel } from "@kenkaiiii/gg-ai";
+import type { Message, Provider, ServerToolDefinition, ThinkingLevel } from "@kenkaiiii/gg-ai";
 import type { AgentTool } from "@kenkaiiii/gg-agent";
 import { useAgentLoop } from "./hooks/useAgentLoop.js";
 import { UserMessage } from "./components/UserMessage.js";
 import { AssistantMessage } from "./components/AssistantMessage.js";
 import { ToolExecution } from "./components/ToolExecution.js";
+import { ServerToolExecution } from "./components/ServerToolExecution.js";
 import { SubAgentPanel, type SubAgentInfo } from "./components/SubAgentPanel.js";
 import type { SubAgentUpdate, SubAgentDetails } from "../tools/subagent.js";
 import { StreamingArea } from "./components/StreamingArea.js";
@@ -84,11 +85,30 @@ interface SubAgentGroupItem {
   id: string;
 }
 
+interface ServerToolStartItem {
+  kind: "server_tool_start";
+  serverToolCallId: string;
+  name: string;
+  input: unknown;
+  id: string;
+}
+
+interface ServerToolDoneItem {
+  kind: "server_tool_done";
+  name: string;
+  input: unknown;
+  resultType: string;
+  data: unknown;
+  id: string;
+}
+
 export type CompletedItem =
   | UserItem
   | AssistantItem
   | ToolStartItem
   | ToolDoneItem
+  | ServerToolStartItem
+  | ServerToolDoneItem
   | ErrorItem
   | InfoItem
   | DurationItem
@@ -143,6 +163,7 @@ export interface AppProps {
   provider: Provider;
   model: string;
   tools: AgentTool[];
+  serverTools?: ServerToolDefinition[];
   messages: Message[];
   maxTokens: number;
   thinking?: ThinkingLevel;
@@ -225,6 +246,7 @@ export function App(props: AppProps) {
       provider: currentProvider,
       model: currentModel,
       tools: props.tools,
+      serverTools: props.serverTools,
       maxTokens: props.maxTokens,
       thinking: props.thinking,
       apiKey: activeApiKey,
@@ -357,6 +379,37 @@ export function App(props: AppProps) {
         },
         [],
       ),
+      onServerToolCall: useCallback((id: string, name: string, input: unknown) => {
+        setLiveItems((prev) => [
+          ...prev,
+          { kind: "server_tool_start", serverToolCallId: id, name, input, id: getId() },
+        ]);
+      }, []),
+      onServerToolResult: useCallback((toolUseId: string, resultType: string, data: unknown) => {
+        setLiveItems((prev) => {
+          const startIdx = prev.findIndex(
+            (item) => item.kind === "server_tool_start" && item.serverToolCallId === toolUseId,
+          );
+          if (startIdx !== -1) {
+            const startItem = prev[startIdx] as ServerToolStartItem;
+            const doneItem: ServerToolDoneItem = {
+              kind: "server_tool_done",
+              name: startItem.name,
+              input: startItem.input,
+              resultType,
+              data,
+              id: startItem.id,
+            };
+            const next = [...prev];
+            next[startIdx] = doneItem;
+            return next;
+          }
+          return [
+            ...prev,
+            { kind: "server_tool_done", name: "unknown", input: {}, resultType, data, id: getId() },
+          ];
+        });
+      }, []),
       onDone: useCallback((durationMs: number, toolsUsed: string[]) => {
         setDoneStatus({ durationMs, toolsUsed });
       }, []),
@@ -492,6 +545,21 @@ export function App(props: AppProps) {
             args={item.args}
             result={item.result}
             isError={item.isError}
+          />
+        );
+      case "server_tool_start":
+        return (
+          <ServerToolExecution key={item.id} status="running" name={item.name} input={item.input} />
+        );
+      case "server_tool_done":
+        return (
+          <ServerToolExecution
+            key={item.id}
+            status="done"
+            name={item.name}
+            input={item.input}
+            resultType={item.resultType}
+            data={item.data}
           />
         );
       case "error":
