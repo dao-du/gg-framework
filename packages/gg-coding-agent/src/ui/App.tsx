@@ -634,9 +634,9 @@ export function App(props: AppProps) {
       // Persist model selection for next CLI launch
       if (props.settingsFile) {
         const sm = new SettingsManager(props.settingsFile);
-        sm.load().then(() => {
-          void sm.set("defaultProvider", newProvider);
-          void sm.set("defaultModel", newModelId);
+        sm.load().then(async () => {
+          await sm.set("defaultProvider", newProvider);
+          await sm.set("defaultModel", newModelId);
         });
       }
     },
