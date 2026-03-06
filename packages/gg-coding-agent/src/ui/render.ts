@@ -64,6 +64,15 @@ export async function renderApp(config: RenderAppConfig): Promise<void> {
         settingsFile: config.settingsFile,
       }),
     ),
+    {
+      // Enable kitty keyboard protocol so terminals that support it can
+      // distinguish Shift+Enter from Enter (needed for multiline input).
+      // Terminals without support gracefully ignore this.
+      kittyKeyboard: {
+        mode: "enabled",
+        flags: ["disambiguateEscapeCodes"],
+      },
+    },
   );
 
   // Ink's built-in resize handler only clears the live area on terminal

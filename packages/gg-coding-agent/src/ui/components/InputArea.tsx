@@ -146,7 +146,7 @@ export function InputArea({
         return;
       }
 
-      if (key.return && key.shift) {
+      if (key.return && (key.shift || key.meta)) {
         setValue((v) => v + "\n");
         return;
       }
