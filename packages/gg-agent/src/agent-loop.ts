@@ -41,10 +41,12 @@ export async function* agentLoop(
   options: AgentOptions,
 ): AsyncGenerator<AgentEvent, AgentResult> {
   const maxTurns = options.maxTurns ?? DEFAULT_MAX_TURNS;
+  const maxContinuations = options.maxContinuations ?? 5;
   const toolMap = new Map<string, AgentTool>((options.tools ?? []).map((t) => [t.name, t]));
 
   const totalUsage: Usage = { inputTokens: 0, outputTokens: 0 };
   let turn = 0;
+  let consecutivePauses = 0;
   let overflowRetried = false;
 
   while (turn < maxTurns) {
@@ -77,6 +79,7 @@ export async function* agentLoop(
         signal: options.signal,
         accountId: options.accountId,
         cacheRetention: options.cacheRetention,
+        compaction: options.compaction,
       });
 
       // Suppress unhandled rejection if the iterator path throws first
@@ -143,6 +146,18 @@ export async function* agentLoop(
       stopReason: response.stopReason,
       usage: response.usage,
     };
+
+    // Server-side tool hit iteration limit — re-send to continue.
+    // Do NOT add an extra user message; the API detects the trailing
+    // server_tool_use block and resumes automatically.
+    if (response.stopReason === "pause_turn") {
+      consecutivePauses++;
+      if (consecutivePauses >= maxContinuations) {
+        break; // Safety limit — fall through to agent_done below
+      }
+      continue;
+    }
+    consecutivePauses = 0;
 
     // If not tool_use, we're done
     if (response.stopReason !== "tool_use") {

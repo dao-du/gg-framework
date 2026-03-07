@@ -131,6 +131,11 @@ export interface AgentOptions {
   signal?: AbortSignal;
   accountId?: string;
   cacheRetention?: StreamOptions["cacheRetention"];
+  /** Enable server-side compaction (Anthropic only, beta). */
+  compaction?: boolean;
+  /** Max consecutive pause_turn continuations before stopping (default: 5).
+   *  Prevents infinite loops when server-side tools keep pausing. */
+  maxContinuations?: number;
   /**
    * Called before each LLM call. Allows the caller to inspect and transform
    * the messages array (e.g. compaction, truncation). Return the same array

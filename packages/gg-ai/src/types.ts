@@ -59,13 +59,20 @@ export interface ServerToolResult {
   data: unknown;
 }
 
+/** Opaque content block preserved for round-tripping (e.g. compaction blocks). */
+export interface RawContent {
+  type: "raw";
+  data: Record<string, unknown>;
+}
+
 export type ContentPart =
   | TextContent
   | ThinkingContent
   | ImageContent
   | ToolCall
   | ServerToolCall
-  | ServerToolResult;
+  | ServerToolResult
+  | RawContent;
 
 // ── Messages ───────────────────────────────────────────────
 
@@ -173,7 +180,14 @@ export type StreamEvent =
 
 // ── Stop Reasons ───────────────────────────────────────────
 
-export type StopReason = "end_turn" | "tool_use" | "max_tokens" | "error";
+export type StopReason =
+  | "end_turn"
+  | "tool_use"
+  | "max_tokens"
+  | "pause_turn"
+  | "stop_sequence"
+  | "refusal"
+  | "error";
 
 // ── Response ───────────────────────────────────────────────
 
@@ -212,4 +226,7 @@ export interface StreamOptions {
   cacheRetention?: CacheRetention;
   /** OpenAI ChatGPT account ID (from OAuth JWT) for codex endpoint */
   accountId?: string;
+  /** Enable server-side compaction (Anthropic only, beta). Automatically
+   *  summarizes earlier context when approaching the context window limit. */
+  compaction?: boolean;
 }

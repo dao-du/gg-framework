@@ -14,6 +14,7 @@ export type {
   ServerToolCall,
   ServerToolResult,
   ServerToolDefinition,
+  RawContent,
   ContentPart,
   SystemMessage,
   UserMessage,

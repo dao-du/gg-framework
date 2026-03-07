@@ -4,6 +4,7 @@ import type {
   CacheRetention,
   ContentPart,
   Message,
+  StopReason,
   TextContent,
   ThinkingContent,
   ThinkingLevel,
@@ -88,6 +89,7 @@ export function toAnthropicMessages(
                 } as unknown as Anthropic.ContentBlockParam;
               if (part.type === "server_tool_result")
                 return part.data as unknown as Anthropic.ContentBlockParam;
+              if (part.type === "raw") return part.data as unknown as Anthropic.ContentBlockParam;
               // image content shouldn't appear in assistant messages
               return { type: "text", text: "" };
             });
@@ -196,14 +198,15 @@ export function toAnthropicThinking(
   outputConfig?: { effort: string };
 } {
   if (supportsAdaptiveThinking(model)) {
-    // Adaptive thinking — model decides when/how much to think
+    // Adaptive thinking — model decides when/how much to think.
+    // budget_tokens is deprecated on Opus 4.6 / Sonnet 4.6.
     // "max" effort is Opus-only; downgrade to "high" for Sonnet
     let effort: string = level;
     if (level === "max" && !model.includes("opus")) {
       effort = "high";
     }
     return {
-      thinking: { type: "enabled", budget_tokens: 10000 },
+      thinking: { type: "adaptive" } as unknown as Anthropic.ThinkingConfigParam,
       maxTokens,
       outputConfig: { effort },
     };
@@ -338,27 +341,31 @@ export function toOpenAIReasoningEffort(level: ThinkingLevel): "low" | "medium" 
 
 // ── Response Normalization ─────────────────────────────────
 
-export function normalizeAnthropicStopReason(
-  reason: string | null,
-): "end_turn" | "tool_use" | "max_tokens" {
+export function normalizeAnthropicStopReason(reason: string | null): StopReason {
   switch (reason) {
     case "tool_use":
       return "tool_use";
     case "max_tokens":
       return "max_tokens";
+    case "pause_turn":
+      return "pause_turn";
+    case "stop_sequence":
+      return "stop_sequence";
+    case "refusal":
+      return "refusal";
     default:
       return "end_turn";
   }
 }
 
-export function normalizeOpenAIStopReason(
-  reason: string | null,
-): "end_turn" | "tool_use" | "max_tokens" {
+export function normalizeOpenAIStopReason(reason: string | null): StopReason {
   switch (reason) {
     case "tool_calls":
       return "tool_use";
     case "length":
       return "max_tokens";
+    case "stop":
+      return "stop_sequence";
     default:
       return "end_turn";
   }

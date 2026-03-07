@@ -29,11 +29,7 @@ async function runStream(options: StreamOptions, result: StreamResult): Promise<
 
   const client = new Anthropic({
     ...(isOAuth
-      ? {
-          apiKey: null as unknown as string,
-          authToken: options.apiKey,
-          defaultHeaders: { "anthropic-beta": "oauth-2025-04-20" },
-        }
+      ? { apiKey: null as unknown as string, authToken: options.apiKey }
       : { apiKey: options.apiKey }),
     ...(options.baseUrl ? { baseURL: options.baseUrl } : {}),
   });
@@ -77,11 +73,20 @@ async function runStream(options: StreamOptions, result: StreamResult): Promise<
     ...(options.toolChoice && options.tools?.length
       ? { tool_choice: toAnthropicToolChoice(options.toolChoice) }
       : {}),
+    ...(options.compaction
+      ? { context_management: { edits: [{ type: "compact_20260112" }] } }
+      : {}),
     stream: true,
-  };
+  } as Anthropic.MessageCreateParams;
+
+  const betaHeaders = [
+    ...(isOAuth ? ["oauth-2025-04-20"] : []),
+    ...(options.compaction ? ["compact-2026-01-12"] : []),
+  ];
 
   const stream = client.messages.stream(params, {
     signal: options.signal ?? undefined,
+    ...(betaHeaders.length ? { headers: { "anthropic-beta": betaHeaders.join(",") } } : {}),
   });
 
   const contentParts: ContentPart[] = [];
@@ -155,10 +160,10 @@ async function runStream(options: StreamOptions, result: StreamResult): Promise<
         input: stc.input,
       });
     } else {
-      // Handle result blocks (web_search_tool_result)
       const raw = block as unknown as Record<string, unknown>;
       const blockType = raw.type as string;
       if (blockType === "web_search_tool_result") {
+        // Server tool result blocks
         const str: ServerToolResult = {
           type: "server_tool_result",
           toolUseId: raw.tool_use_id as string,
@@ -172,6 +177,9 @@ async function runStream(options: StreamOptions, result: StreamResult): Promise<
           resultType: str.resultType,
           data: str.data,
         });
+      } else {
+        // Preserve unknown blocks (e.g. compaction) for round-tripping
+        contentParts.push({ type: "raw", data: raw });
       }
     }
   });
