@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from "react";
-import { Box, Text, Static } from "ink";
+import { Box, Text, Static, useStdout } from "ink";
 import crypto from "node:crypto";
 import type {
   Message,
@@ -227,6 +227,7 @@ export interface AppProps {
 
 export function App(props: AppProps) {
   const theme = useTheme();
+  const { stdout } = useStdout();
 
   // Terminal title — updated later after agentLoop is created
   // (hoisted here so the hook is always called in the same order)
@@ -744,9 +745,12 @@ export function App(props: AppProps) {
         return;
       }
 
-      // Handle /clear — reset session
+      // Handle /clear — reset session and clear terminal
       if (trimmed === "/clear") {
-        setHistory([]);
+        // Clear terminal screen + scrollback — needed because Ink's <Static>
+        // writes directly to stdout and can't be removed by clearing React state
+        stdout?.write("\x1b[2J\x1b[3J\x1b[H");
+        setHistory([{ kind: "banner", id: "banner" }]);
         setLiveItems([]);
         messagesRef.current = messagesRef.current.slice(0, 1); // keep system prompt
         agentLoop.reset();
