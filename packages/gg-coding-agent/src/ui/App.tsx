@@ -311,6 +311,10 @@ export function App(props: AppProps) {
 
   const getId = () => String(nextIdRef.current++);
 
+  // Two-phase flush: items waiting to be moved to Static history after the
+  // live area has been cleared and Ink has committed the smaller output.
+  const pendingFlushRef = useRef<CompletedItem[]>([]);
+
   // Derive credentials for the current provider
   const currentCreds = props.credentialsByProvider?.[currentProvider];
   const activeApiKey = currentCreds?.accessToken ?? props.apiKey;
@@ -730,15 +734,15 @@ export function App(props: AppProps) {
           toolsUsed: toolsUsed.join(",") || "none",
         });
         setDoneStatus({ durationMs, toolsUsed, verb: pickDurationVerb(toolsUsed) });
-        // Flush live items to Static immediately so the long text exits
-        // the live area.  Ink's cursor math can miscount wrapped lines and
-        // clip the bottom of the content on subsequent live-area re-renders.
-        // Moving items to Static writes them once — no further rewrites.
-        // Flush live items to Static but WITHOUT a DurationItem — the
-        // duration line is already shown via doneStatus in the live area.
+        // Two-phase flush to avoid Ink text clipping.
+        // Phase 1 (here): clear the live area so Ink commits a render with
+        // the smaller output and updates its internal line counter.
+        // Phase 2 (useEffect below): push items to Static history in a
+        // separate render cycle so the Static write never coincides with
+        // a live-area height change in the same frame.
         setLiveItems((prev) => {
           if (prev.length > 0) {
-            setHistory((h) => pruneHistory([...h, ...prev]));
+            pendingFlushRef.current = prev;
           }
           return [];
         });
@@ -755,26 +759,20 @@ export function App(props: AppProps) {
     },
   );
 
-  // Flush liveItems to Static history after the agent finishes, with a short
-  // delay to avoid Ink cursor-math glitches. Ink miscalculates live-area
-  // height for wrapped lines, so flushing immediately on isRunning transition
-  // caused text truncation. The 300ms delay lets Ink finish rendering the
-  // final state before we move items to Static (where they're printed once
-  // and never re-rendered). This keeps the live area empty when idle, which
-  // prevents flickering and viewport snapping when the user scrolls.
+  // Phase 2 of the two-phase flush: after onDone clears liveItems (phase 1)
+  // and Ink renders the smaller live area (updating its internal line
+  // counter), this effect pushes the stashed items into Static history.
+  // Because the Static write happens in a SEPARATE render cycle from the
+  // live-area shrink, Ink's log-update never needs to erase the old tall
+  // live area AND write Static content in the same frame — avoiding the
+  // cursor-math mismatch that caused text clipping.
   useEffect(() => {
-    if (!agentLoop.isRunning && liveItems.length > 0) {
-      const timer = setTimeout(() => {
-        setLiveItems((prev) => {
-          if (prev.length > 0) {
-            setHistory((h) => pruneHistory([...h, ...prev]));
-          }
-          return [];
-        });
-      }, 300);
-      return () => clearTimeout(timer);
+    if (pendingFlushRef.current.length > 0) {
+      const items = pendingFlushRef.current;
+      pendingFlushRef.current = [];
+      setHistory((h) => pruneHistory([...h, ...items]));
     }
-  }, [agentLoop.isRunning, liveItems.length]);
+  });
 
   // Sync terminal title with agent loop state
   useEffect(() => {
