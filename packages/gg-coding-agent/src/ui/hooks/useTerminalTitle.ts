@@ -42,13 +42,13 @@ export function useTerminalTitle(phase: ActivityPhase, isRunning: boolean): void
     if (!stdout) return;
     const text = getTitleText(phase, isRunning);
     const title = isRunning ? `${SPINNER_FRAMES[spinnerFrame]} ${text}` : text;
-    stdout.write(`\x1b]0;${title}\x07`);
+    stdout.write(`\x1b]0;${title}\x1b\\`);
   }, [stdout, phase, isRunning, spinnerFrame]);
 
   // Reset title on unmount
   useEffect(() => {
     return () => {
-      stdout?.write(`\x1b]0;GG Coder\x07`);
+      stdout?.write(`\x1b]0;GG Coder\x1b\\`);
     };
   }, [stdout]);
 }
