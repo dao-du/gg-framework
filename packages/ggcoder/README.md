@@ -34,6 +34,38 @@ OAuth for Anthropic and OpenAI (log in once, auto-refresh). API keys for GLM and
 
 ---
 
+## The system prompt problem
+
+Every token in the system prompt gets processed on **every single turn**. It's not a one-time cost. It's a tax on every request.
+
+| | **Claude Code / Agent SDK** | **GG Coder** |
+|---|---|---|
+| System prompt size | ~15,000 tokens | **~1,100 tokens** |
+| Ratio | baseline | **~13x smaller** |
+
+### Why you should care
+
+- **Slower responses.** More input tokens = longer time-to-first-token. In a 30-turn session, that wait adds up to minutes.
+- **Worse instruction following.** More rules = more things the model ignores. "Lost in the middle" is well-documented. A 1,100 token prompt gets read. A 15,000 token one gets skimmed.
+- **Context fills up faster.** ~15,000 tokens sitting in your window permanently. That's ~7.5% of a 200K model gone before you say hello. You hit compaction sooner, lose history faster, and the agent forgets what it was doing.
+- **Higher cost.** Input tokens aren't free. Every cache miss charges you for the full bloat. Smaller prompt = smaller bill.
+
+GG Coder sends only what the model needs: how to work, what tools it has, and your project context. No walls of rules. No formatting instructions. Just signal.
+
+---
+
+## The MCP problem
+
+Same philosophy applies to tools. People collect MCPs like Pokemon. Slack MCP, GitHub MCP, Notion MCP, five different file system MCPs. Every single one injects its tool descriptions into the context. The model now has to figure out which of 40+ tools to use for any given task.
+
+This doesn't help. It confuses the agent. More tool descriptions = more noise = worse tool selection. The model spends tokens reasoning about tools it will never call.
+
+GG Coder ships with one MCP: [Grep](https://grep.dev). That's it. It lets the agent search across 1M+ public GitHub repos to verify implementations against real-world code. Correct API usage, library idioms, production patterns. One tool that actually makes the output better.
+
+You can still add your own MCPs if you need them. But start with less. You'll get better results.
+
+---
+
 ## Four providers, one agent
 
 Switch mid-conversation with `/model`. Not locked to anyone.

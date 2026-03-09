@@ -27,46 +27,6 @@ Three packages. Each one works on its own. Stack them together and you get a ful
 
 ---
 
-## Why this exists
-
-I've been writing code since before the AI wave hit. Been using Claude Code since release, and have gone through just about every coding agent out there since early 2024. I know what works and what's just overhead.
-
-Claude Code is great. I use it daily. But after enough time with it, you notice how much baggage it carries. ~15,000 tokens of system prompt on every single request. The Claude Agent SDK does the same thing since it's Claude Code under the hood.
-
-GG Framework is what happens when you strip all of that out and keep only what actually matters. A streaming layer, an agent loop, and a CLI. Each one clean enough to use on its own.
-
----
-
-## The system prompt problem
-
-Every token in the system prompt gets processed on **every single turn**. It's not a one-time cost. It's a tax on every request.
-
-| | **Claude Code / Agent SDK** | **GG Coder** |
-|---|---|---|
-| System prompt size | ~15,000 tokens | **~1,100 tokens** |
-| Ratio | baseline | **~13x smaller** |
-
-### Why you should care
-
-- **Slower responses.** More input tokens = longer time-to-first-token. In a 30-turn session, that wait adds up to minutes.
-- **Worse instruction following.** More rules = more things the model ignores. "Lost in the middle" is well-documented. A 1,100 token prompt gets read. A 15,000 token one gets skimmed.
-- **Context fills up faster.** ~15,000 tokens sitting in your window permanently. That's ~7.5% of a 200K model gone before you say hello. You hit compaction sooner, lose history faster, and the agent forgets what it was doing.
-- **Higher cost.** Input tokens aren't free. Every cache miss charges you for the full bloat. Smaller prompt = smaller bill.
-
----
-
-## The MCP problem
-
-Same philosophy applies to tools. People collect MCPs like Pokemon. Slack MCP, GitHub MCP, Notion MCP, five different file system MCPs. Every single one injects its tool descriptions into the context. The model now has to figure out which of 40+ tools to use for any given task.
-
-This doesn't help. It confuses the agent. More tool descriptions = more noise = worse tool selection. The model spends tokens reasoning about tools it will never call.
-
-GG Coder ships with one MCP: [Grep](https://grep.dev). That's it. It lets the agent search across 1M+ public GitHub repos to verify implementations against real-world code. Correct API usage, library idioms, production patterns. One tool that actually makes the output better.
-
-You can still add your own MCPs if you need them. But start with less. You'll get better results.
-
----
-
 ## Getting started
 
 ```bash
