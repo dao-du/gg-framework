@@ -1,7 +1,7 @@
-# GG Coder
+# GG Framework
 
 <p align="center">
-  <strong>The fast, lean coding agent. Four providers. Zero bloat.</strong>
+  <strong>Modular TypeScript framework for building LLM-powered apps. From raw streaming to full coding agent.</strong>
 </p>
 
 <p align="center">
@@ -11,11 +11,29 @@
   <a href="https://skool.com/kenkai"><img src="https://img.shields.io/badge/Skool-Community-7C3AED?style=for-the-badge" alt="Skool"></a>
 </p>
 
+Three packages. Each one works on its own. Stack them together and you get a full coding agent.
+
+| Package | What it does | README |
+|---|---|---|
+| [`@kenkaiiii/gg-ai`](https://www.npmjs.com/package/@kenkaiiii/gg-ai) | Unified LLM streaming API across four providers | [packages/gg-ai](packages/gg-ai/README.md) |
+| [`@kenkaiiii/gg-agent`](https://www.npmjs.com/package/@kenkaiiii/gg-agent) | Agent loop with multi-turn tool execution | [packages/gg-agent](packages/gg-agent/README.md) |
+| [`@kenkaiiii/ggcoder`](https://www.npmjs.com/package/@kenkaiiii/ggcoder) | CLI coding agent with OAuth, tools, and TUI | [packages/gg-coding-agent](packages/gg-coding-agent/README.md) |
+
+```
+@kenkaiiii/gg-ai (standalone)
+  └─► @kenkaiiii/gg-agent (depends on gg-ai)
+        └─► @kenkaiiii/ggcoder (depends on both)
+```
+
+---
+
+## Why this exists
+
 I've been writing code since before the AI wave hit. Been using Claude Code since release, and have gone through just about every coding agent out there since early 2024. I know what works and what's just overhead.
 
 Claude Code is great. I use it daily. But after enough time with it, you notice how much baggage it carries. ~15,000 tokens of system prompt on every single request. The Claude Agent SDK does the same thing since it's Claude Code under the hood.
 
-GG Coder is what happens when you strip all of that out and keep only what actually matters.
+GG Framework is what happens when you strip all of that out and keep only what actually matters. A streaming layer, an agent loop, and a CLI. Each one clean enough to use on its own.
 
 ---
 
@@ -35,8 +53,6 @@ Every token in the system prompt gets processed on **every single turn**. It's n
 - **Context fills up faster.** ~15,000 tokens sitting in your window permanently. That's ~7.5% of a 200K model gone before you say hello. You hit compaction sooner, lose history faster, and the agent forgets what it was doing.
 - **Higher cost.** Input tokens aren't free. Every cache miss charges you for the full bloat. Smaller prompt = smaller bill.
 
-GG Coder sends only what the model needs: how to work, what tools it has, and your project context. No walls of rules. No formatting instructions. Just signal.
-
 ---
 
 ## The MCP problem
@@ -51,132 +67,41 @@ You can still add your own MCPs if you need them. But start with less. You'll ge
 
 ---
 
-## Four providers, one agent
-
-Switch mid-conversation with `/model`. Not locked to anyone.
-
-| Provider | Models | Auth |
-|---|---|---|
-| **Anthropic** | Claude Opus 4.6, Sonnet 4.6, Haiku 4.5 | OAuth |
-| **OpenAI** | GPT-4.1, o3, o4-mini | OAuth |
-| **Z.AI (GLM)** | GLM-5, GLM-4.7 | API key |
-| **Moonshot** | Kimi K2.5 | API key |
-
-OAuth for Anthropic and OpenAI (log in once, auto-refresh). API keys for GLM and Moonshot. Up and running in seconds either way.
-
----
-
-## Slash commands
-
-Everything runs through slash commands inside the session. Not CLI flags.
-
-```bash
-/model claude-opus-4-6       # Switch models on the fly
-/model kimi-k2.5
-/compact                      # Compress context when it gets long
-
-# Built-in workflows
-/scan          # Dead code, bugs, security issues (5 parallel agents)
-/verify        # Verify against docs and best practices (8 parallel agents)
-/research      # Research best tools and patterns for your stack
-/init          # Generate CLAUDE.md for your project
-/setup-lint    # Generate a /fix command for your stack
-/setup-commit  # Generate a /commit command with quality checks
-/setup-tests   # Set up testing + generate /test
-/setup-update  # Generate an /update command for deps
-```
-
----
-
-## Custom commands
-
-Drop a markdown file in `.gg/commands/` and it becomes a slash command.
-
-```markdown
----
-name: deploy
-description: Build, test, and deploy to production
----
-
-1. Run the test suite
-2. Build for production
-3. Deploy using the project's deploy script
-4. Verify the deployment is healthy
-```
-
-Now `/deploy` works in that project. Your React app gets `/deploy` and `/storybook`. Your API gets `/migrate` and `/seed`. Different projects, different commands.
-
----
-
-## Skills
-
-Reusable behaviors across projects. Drop `.md` files in:
-
-- `~/.gg/skills/` for global skills (available everywhere)
-- `.gg/skills/` for project-specific skills
-
-They get loaded into the system prompt automatically. The agent knows what it can do without you explaining it each session.
-
----
-
-## Project guidelines
-
-Drop a `CLAUDE.md` or `AGENTS.md` in your repo root (or any parent directory). GG Coder picks it up automatically.
-
-Your rules. Your conventions. The agent follows them.
-
----
-
-## Getting started
-
-```bash
-npm i -g @kenkaiiii/ggcoder
-```
-
-1. `ggcoder login`
-2. Pick your provider
-3. Authenticate
-4. `ggcoder`
-
-That's it.
-
----
-
-## Usage
-
-```bash
-ggcoder
-```
-
-All slash commands are listed above. Just start typing `/` and go.
-
----
-
-## The packages
-
-Three npm packages. Use them together or separately.
-
-| Package | What it does |
-|---|---|
-| [`@kenkaiiii/gg-ai`](https://www.npmjs.com/package/@kenkaiiii/gg-ai) | Unified streaming API across all four providers |
-| [`@kenkaiiii/gg-agent`](https://www.npmjs.com/package/@kenkaiiii/gg-agent) | Agent loop with multi-turn tool execution |
-| [`@kenkaiiii/ggcoder`](https://www.npmjs.com/package/@kenkaiiii/ggcoder) | The full CLI |
+## Quick start
 
 ### Streaming API
+
+```bash
+npm i @kenkaiiii/gg-ai
+```
 
 ```typescript
 import { stream } from "@kenkaiiii/gg-ai";
 
+// Stream events
 for await (const event of stream({
   provider: "anthropic",
   model: "claude-sonnet-4-6",
+  apiKey: "sk-...",
   messages: [{ role: "user", content: "Hello!" }],
 })) {
   if (event.type === "text_delta") process.stdout.write(event.text);
 }
+
+// Or just await the final response
+const response = await stream({
+  provider: "openai",
+  model: "gpt-4.1",
+  apiKey: "sk-...",
+  messages: [{ role: "user", content: "Hello!" }],
+});
 ```
 
 ### Agent loop
+
+```bash
+npm i @kenkaiiii/gg-agent
+```
 
 ```typescript
 import { Agent } from "@kenkaiiii/gg-agent";
@@ -185,6 +110,7 @@ import { z } from "zod";
 const agent = new Agent({
   provider: "moonshot",
   model: "kimi-k2.5",
+  apiKey: "sk-...",
   system: "You are a helpful assistant.",
   tools: [{
     name: "get_weather",
@@ -199,6 +125,14 @@ const agent = new Agent({
 for await (const event of agent.prompt("What's the weather in Tokyo?")) {
   // text_delta, tool_call_start, tool_call_end, agent_done, etc.
 }
+```
+
+### CLI
+
+```bash
+npm i -g @kenkaiiii/ggcoder
+ggcoder login
+ggcoder
 ```
 
 ---
@@ -230,7 +164,7 @@ MIT
 ---
 
 <p align="center">
-  <strong>Less bloat. More coding. Four providers. One agent.</strong>
+  <strong>Less bloat. More coding. Four providers. Three packages. One framework.</strong>
 </p>
 
 <p align="center">
