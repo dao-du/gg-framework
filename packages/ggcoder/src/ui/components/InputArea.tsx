@@ -215,9 +215,10 @@ export function InputArea({
       }
 
       if (key.ctrl && input === "c") {
-        if (value) {
+        if (value || images.length > 0) {
           setValue("");
           setCursor(0);
+          setImages([]);
         } else {
           onAbort();
         }
@@ -242,6 +243,8 @@ export function InputArea({
         if (cursor > 0) {
           setValue((v) => v.slice(0, cursor - 1) + v.slice(cursor));
           setCursor((c) => c - 1);
+        } else if (!value && images.length > 0) {
+          setImages((prev) => prev.slice(0, -1));
         }
         return;
       }
@@ -290,9 +293,10 @@ export function InputArea({
 
       if (key.escape) {
         const now = Date.now();
-        if (value && now - lastEscRef.current < 400) {
+        if ((value || images.length > 0) && now - lastEscRef.current < 400) {
           setValue("");
           setCursor(0);
+          setImages([]);
         }
         lastEscRef.current = now;
         return;
@@ -402,7 +406,13 @@ export function InputArea({
       >
         {images.length > 0 && (
           <Box>
-            <Text color={theme.accent}>{images.map((_, i) => `[Image #${i + 1}]`).join(" ")}</Text>
+            <Text color={theme.accent}>
+              {images
+                .map((img, i) =>
+                  img.kind === "text" ? `[File: ${img.fileName}]` : `[Image #${i + 1}]`,
+                )
+                .join(" ")}
+            </Text>
           </Box>
         )}
         {displayLines.map((line, i) => {

@@ -1032,7 +1032,14 @@ export function App(props: AppProps) {
           parts.push({ type: "text", text: trimmed });
         }
         for (const img of inputImages) {
-          parts.push({ type: "image", mediaType: img.mediaType, data: img.data });
+          if (img.kind === "text") {
+            parts.push({
+              type: "text",
+              text: `<file name="${img.fileName}">\n${img.data}\n</file>`,
+            });
+          } else {
+            parts.push({ type: "image", mediaType: img.mediaType, data: img.data });
+          }
         }
         userContent = parts;
       } else {

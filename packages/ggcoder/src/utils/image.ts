@@ -3,6 +3,8 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"]);
+const TEXT_EXTENSIONS = new Set([".md", ".txt"]);
+const ATTACHABLE_EXTENSIONS = new Set([...IMAGE_EXTENSIONS, ...TEXT_EXTENSIONS]);
 
 const MEDIA_TYPES: Record<string, string> = {
   ".png": "image/png",
@@ -14,16 +16,23 @@ const MEDIA_TYPES: Record<string, string> = {
 };
 
 export interface ImageAttachment {
+  kind: "image" | "text";
   fileName: string;
   filePath: string;
   mediaType: string;
-  data: string; // base64
+  data: string; // base64 for images, raw text for text files
 }
 
 /** Check if a file path points to an image based on extension. */
 export function isImagePath(filePath: string): boolean {
   const ext = path.extname(filePath).toLowerCase();
   return IMAGE_EXTENSIONS.has(ext);
+}
+
+/** Check if a file path points to an attachable file (image or text). */
+export function isAttachablePath(filePath: string): boolean {
+  const ext = path.extname(filePath).toLowerCase();
+  return ATTACHABLE_EXTENSIONS.has(ext);
 }
 
 function resolvePath(filePath: string, cwd: string): string {
@@ -49,8 +58,8 @@ function resolvePath(filePath: string, cwd: string): string {
 }
 
 /**
- * Extract image file paths from input text by checking if tokens resolve
- * to existing image files on disk. Returns verified paths and the remaining text.
+ * Extract attachable file paths from input text by checking if tokens resolve
+ * to existing files on disk. Returns verified paths and the remaining text.
  */
 export async function extractImagePaths(
   text: string,
@@ -61,7 +70,7 @@ export async function extractImagePaths(
 
   // Try the entire input as a single path first
   const wholePath = resolvePath(text, cwd);
-  if (isImagePath(wholePath) && (await fileExists(wholePath))) {
+  if (isAttachablePath(wholePath) && (await fileExists(wholePath))) {
     return { imagePaths: [wholePath], cleanText: "" };
   }
 
@@ -70,7 +79,7 @@ export async function extractImagePaths(
   for (const token of tokens) {
     if (!token) continue;
     const resolved = resolvePath(token, cwd);
-    if (isImagePath(resolved) && (await fileExists(resolved))) {
+    if (isAttachablePath(resolved) && (await fileExists(resolved))) {
       imagePaths.push(resolved);
     } else {
       cleanParts.push(token);
@@ -89,13 +98,26 @@ async function fileExists(filePath: string): Promise<boolean> {
   }
 }
 
-/** Read an image file and return base64 data with media type. */
+/** Read a file and return an attachment (base64 for images, raw text for text files). */
 export async function readImageFile(filePath: string): Promise<ImageAttachment> {
   const ext = path.extname(filePath).toLowerCase();
+
+  if (TEXT_EXTENSIONS.has(ext)) {
+    const content = await fs.readFile(filePath, "utf-8");
+    return {
+      kind: "text",
+      fileName: path.basename(filePath),
+      filePath,
+      mediaType: "text/plain",
+      data: content,
+    };
+  }
+
   const mediaType = MEDIA_TYPES[ext] ?? "image/png";
   const buffer = await fs.readFile(filePath);
   const data = buffer.toString("base64");
   return {
+    kind: "image",
     fileName: path.basename(filePath),
     filePath,
     mediaType,
@@ -143,6 +165,7 @@ export function getClipboardImage(): Promise<ImageAttachment | null> {
           const buffer = await fs.readFile(tmpPath);
           await fs.unlink(tmpPath).catch(() => {});
           resolve({
+            kind: "image",
             fileName: `clipboard.${ext}`,
             filePath: tmpPath,
             mediaType,
