@@ -87,8 +87,8 @@ export function InputArea({
   const { stdout } = useStdout();
   const columns = stdout?.columns ?? 80;
   const [menuIndex, setMenuIndex] = useState(0);
-  const [pasteStart, setPasteStart] = useState(-1); // char index where paste begins
-  const [pasteEnd, setPasteEnd] = useState(-1); // char index where paste ends
+  const [pasteText, setPasteText] = useState(""); // accumulated pasted content
+  const pasteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Detect if we're in slash command mode
   const isSlashMode = value.startsWith("/") && !value.includes(" ") && commands.length > 0;
@@ -191,8 +191,7 @@ export function InputArea({
           setValue("");
           setCursor(0);
           setImages([]);
-          setPasteStart(-1);
-          setPasteEnd(-1);
+          setPasteText("");
           return;
         }
 
@@ -204,8 +203,7 @@ export function InputArea({
           setValue("");
           setCursor(0);
           setImages([]);
-          setPasteStart(-1);
-          setPasteEnd(-1);
+          setPasteText("");
         }
         return;
       }
@@ -223,8 +221,7 @@ export function InputArea({
           setValue("");
           setCursor(0);
           setImages([]);
-          setPasteStart(-1);
-          setPasteEnd(-1);
+          setPasteText("");
         } else {
           onAbort();
         }
@@ -303,8 +300,7 @@ export function InputArea({
           setValue("");
           setCursor(0);
           setImages([]);
-          setPasteStart(-1);
-          setPasteEnd(-1);
+          setPasteText("");
         }
         lastEscRef.current = now;
         return;
@@ -337,17 +333,21 @@ export function InputArea({
       }
 
       if (input) {
-        // Ink calls useInput once with the full string for pasted text (input.length > 1)
-        if (input.length > 1 && (input.includes("\n") || input.includes("\r"))) {
-          // Normalize line endings for consistent display
-          const normalized = input.replace(/\r\n?/g, "\n");
-          setValue((v) => v.slice(0, cursor) + normalized + v.slice(cursor));
-          setCursor((c) => c + normalized.length);
-          setPasteStart(cursor);
-          setPasteEnd(cursor + normalized.length);
-        } else {
-          setValue((v) => v.slice(0, cursor) + input + v.slice(cursor));
-          setCursor((c) => c + input.length);
+        const normalized = input.replace(/\r\n?/g, "\n");
+        setValue((v) => v.slice(0, cursor) + normalized + v.slice(cursor));
+        setCursor((c) => c + normalized.length);
+
+        // Detect paste: Ink delivers pasted text as input.length > 1
+        // For large pastes, Ink may split into multiple chunks, so we
+        // accumulate and debounce to capture the full paste.
+        if (input.length > 1) {
+          setPasteText((prev) => prev + normalized);
+          if (pasteTimerRef.current) clearTimeout(pasteTimerRef.current);
+          pasteTimerRef.current = setTimeout(() => {
+            // After 100ms of quiet, finalize: only keep paste state if it had newlines
+            setPasteText((p) => (p.includes("\n") ? p : ""));
+            pasteTimerRef.current = null;
+          }, 100);
         }
       }
     },
@@ -434,57 +434,38 @@ export function InputArea({
           </Box>
         )}
         {(() => {
-          if (pasteStart >= 0 && pasteEnd >= 0 && value) {
-            const typedBefore = value.slice(0, pasteStart);
-            const pastedPortion = value.slice(pasteStart, pasteEnd);
-            const typedAfter = value.slice(pasteEnd);
-            const lineCount = pastedPortion.split("\n").length;
+          if (pasteText && value) {
+            // Show collapsed paste indicator with any typed-after text
+            const pasteLineCount = pasteText.split("\n").length;
+            const indicator = `[Pasted text #${pasteText.length} +${pasteLineCount} lines]`;
+            // The typed-after portion is everything in value beyond the paste length
+            // (paste is always appended at cursor, so typed-after = value minus paste content)
+            const pasteLen = pasteText.length;
+            const typedAfter = value.length > pasteLen ? value.slice(pasteLen) : "";
+            const displayStr = indicator + typedAfter;
+            const cursorInDisplay = Math.max(0, cursor - pasteLen + indicator.length);
 
-            // Combine typed-before + paste indicator + typed-after into a single visible line
-            const indicator = `[Pasted text #${pastedPortion.length} +${lineCount} lines]`;
-            const combined = typedBefore + indicator + typedAfter;
-            const combinedLines = getVisualLines(combined, columns);
-
-            // Cursor position mapped into the combined string
-            const cursorInCombined =
-              cursor <= pasteStart
-                ? cursor
-                : cursor >= pasteEnd
-                  ? cursor - (pasteEnd - pasteStart) + indicator.length
-                  : pasteStart + indicator.length; // cursor inside paste → put after indicator
-
-            return combinedLines.map((line, i) => {
-              // Find which combined-line the cursor is on
-              let charsSoFar = 0;
-              let cursorOnThisLine = false;
-              let col = 0;
-              for (let j = 0; j <= i; j++) {
-                if (j === i) {
-                  col = cursorInCombined - charsSoFar;
-                  cursorOnThisLine = col >= 0 && col <= line.length;
-                }
-                charsSoFar += combinedLines[j].length;
-              }
-
-              const before = cursorOnThisLine ? line.slice(0, col) : line;
-              const charUnderCursor = cursorOnThisLine ? (col < line.length ? line[col] : " ") : "";
-              const after = cursorOnThisLine ? line.slice(col + (col < line.length ? 1 : 0)) : "";
-
-              return (
-                <Box key={`paste-${i}`}>
-                  <Text color={disabled ? theme.textDim : theme.inputPrompt} bold>
-                    {i === 0 ? PROMPT : "  "}
+            return (
+              <Box>
+                <Text color={disabled ? theme.textDim : theme.inputPrompt} bold>
+                  {PROMPT}
+                </Text>
+                <Text color={theme.textDim}>{indicator}</Text>
+                {typedAfter && (
+                  <Text color={theme.text}>
+                    {typedAfter.slice(0, cursorInDisplay - indicator.length)}
                   </Text>
-                  <Text color={theme.text}>{before}</Text>
-                  {cursorOnThisLine && (
-                    <Text color={theme.text} inverse={cursorVisible}>
-                      {charUnderCursor}
-                    </Text>
-                  )}
-                  {after && <Text color={theme.text}>{after}</Text>}
-                </Box>
-              );
-            });
+                )}
+                <Text color={theme.text} inverse={cursorVisible}>
+                  {cursor >= pasteLen && cursorInDisplay < displayStr.length
+                    ? displayStr[cursorInDisplay]
+                    : " "}
+                </Text>
+                {cursorInDisplay + 1 < displayStr.length && (
+                  <Text color={theme.text}>{displayStr.slice(cursorInDisplay + 1)}</Text>
+                )}
+              </Box>
+            );
           }
 
           return displayLines.map((line, i) => {
