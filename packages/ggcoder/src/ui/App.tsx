@@ -998,6 +998,7 @@ export function App(props: AppProps) {
         stdout?.write("\x1b[2J\x1b[3J\x1b[H");
         setHistory([{ kind: "banner", id: "banner" }]);
         setLiveItems([]);
+        setDoneStatus(null);
         messagesRef.current = messagesRef.current.slice(0, 1); // keep system prompt
         agentLoop.reset();
         setLiveItems([{ kind: "info", text: "Session cleared.", id: getId() }]);
