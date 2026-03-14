@@ -146,6 +146,7 @@ export function flushOnTurnEnd<T extends FlushableItem>(
   const hasPendingToolStart = liveItems.some(
     (item) =>
       item.kind === "tool_start" ||
+      item.kind === "server_tool_start" ||
       (item.kind === "tool_group" &&
         ((item as unknown as { tools: { status: string }[] }).tools ?? []).some(
           (t) => t.status === "running",

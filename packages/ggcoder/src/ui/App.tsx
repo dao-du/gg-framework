@@ -722,6 +722,14 @@ export function App(props: AppProps) {
           return [{ kind: "assistant", text, thinking, thinkingMs, id: getId() }];
         });
       }, []),
+      onStreamingFlush: useCallback((completedText: string) => {
+        // Progressive flush: move completed paragraphs from the live
+        // streaming area into liveItems so Ink's live area stays bounded.
+        setLiveItems((prev) => [
+          ...prev,
+          { kind: "assistant", text: completedText, thinking: "", thinkingMs: 0, id: getId() },
+        ]);
+      }, []),
       onToolStart: useCallback(
         (toolCallId: string, name: string, args: Record<string, unknown>) => {
           log("INFO", "tool", `Tool call started: ${name}`, { id: toolCallId });
@@ -1014,9 +1022,45 @@ export function App(props: AppProps) {
         log("WARN", "agent", "Agent run aborted by user");
         setRunAllTasks(false);
         setLiveItems((prev) => {
-          const next = prev.map((item) =>
-            item.kind === "subagent_group" ? { ...item, aborted: true } : item,
-          );
+          const next = prev.map((item): CompletedItem => {
+            if (item.kind === "subagent_group") return { ...item, aborted: true };
+            // Convert running tools to stopped state so spinners stop
+            if (item.kind === "tool_start") {
+              return {
+                kind: "tool_done",
+                name: item.name,
+                args: item.args,
+                result: "Stopped.",
+                isError: true,
+                durationMs: 0,
+                id: item.id,
+              };
+            }
+            if (item.kind === "server_tool_start") {
+              return {
+                kind: "server_tool_done",
+                name: item.name,
+                input: item.input,
+                resultType: "aborted",
+                data: null,
+                durationMs: 0,
+                id: item.id,
+              };
+            }
+            if (item.kind === "tool_group") {
+              const tools = (item as ToolGroupItem).tools.map((t) =>
+                t.status === "running"
+                  ? { ...t, status: "done" as const, result: "Stopped.", isError: true }
+                  : t,
+              );
+              return { ...item, tools } as ToolGroupItem;
+            }
+            // Remove compaction spinner (compaction can't complete after abort)
+            if (item.kind === "compacting") {
+              return { kind: "tombstone", id: item.id };
+            }
+            return item;
+          });
           return [...next, { kind: "info", text: "Request was stopped.", id: getId() }];
         });
       }, []),
@@ -1443,6 +1487,7 @@ export function App(props: AppProps) {
             name={item.name}
             input={item.input}
             durationMs={item.durationMs}
+            resultType={item.resultType}
           />
         );
       case "error": {

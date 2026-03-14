@@ -15,6 +15,7 @@ interface ServerToolDoneProps {
   name: string;
   input: unknown;
   durationMs: number;
+  resultType?: string;
 }
 
 type ServerToolExecutionProps = ServerToolRunningProps | ServerToolDoneProps;
@@ -53,6 +54,7 @@ export function ServerToolExecution(props: ServerToolExecutionProps) {
     );
   }
 
+  const isAborted = props.resultType === "aborted";
   const duration = Math.round(props.durationMs / 1000);
 
   return (
@@ -60,7 +62,8 @@ export function ServerToolExecution(props: ServerToolExecutionProps) {
       <Box>{header}</Box>
       <Box paddingLeft={2}>
         <Text color={theme.textDim}>
-          {"⎿  "}Did 1 search in {duration}s
+          {"⎿  "}
+          {isAborted ? "Stopped." : `Did 1 search in ${duration}s`}
         </Text>
       </Box>
     </Box>
