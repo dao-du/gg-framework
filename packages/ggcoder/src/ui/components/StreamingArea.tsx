@@ -3,6 +3,10 @@ import { Text, Box } from "ink";
 import { useTheme } from "../theme/theme.js";
 import { Markdown } from "./Markdown.js";
 import { ThinkingBlock } from "./ThinkingBlock.js";
+import { useTerminalSize } from "../hooks/useTerminalSize.js";
+
+// "⏺ " prefix = 2 chars
+const PREFIX_WIDTH = 2;
 
 interface StreamingAreaProps {
   isRunning: boolean;
@@ -20,6 +24,8 @@ export function StreamingArea({
   thinkingMs,
 }: StreamingAreaProps) {
   const theme = useTheme();
+  const { columns } = useTerminalSize();
+  const contentWidth = Math.max(10, columns - PREFIX_WIDTH);
 
   // Blinking cursor — only blink when text is NOT actively changing.
   // While text streams, the reveal animation already provides visual feedback,
@@ -75,9 +81,11 @@ export function StreamingArea({
       )}
 
       {streamingText && (
-        <Box flexShrink={1}>
-          <Text color={theme.primary}>{"⏺ "}</Text>
-          <Box flexDirection="column" flexGrow={1} flexShrink={1} flexBasis={0}>
+        <Box flexDirection="row">
+          <Box width={PREFIX_WIDTH} flexShrink={0}>
+            <Text color={theme.primary}>{"⏺ "}</Text>
+          </Box>
+          <Box flexDirection="column" flexGrow={1} width={contentWidth}>
             <Markdown>
               {streamingText.trimStart() + (isRunning && cursorVisible ? "\u258D" : "")}
             </Markdown>

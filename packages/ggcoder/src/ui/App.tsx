@@ -1485,13 +1485,13 @@ export function App(props: AppProps) {
       case "error": {
         const providerHint = getProviderErrorHint(item.message);
         return (
-          <Box key={item.id} marginTop={1} flexDirection="column">
-            <Text color={theme.error}>
+          <Box key={item.id} marginTop={1} flexDirection="column" flexShrink={1}>
+            <Text color={theme.error} wrap="wrap">
               {"✗ "}
               {item.message}
             </Text>
             {providerHint && (
-              <Text color={theme.textDim}>
+              <Text color={theme.textDim} wrap="wrap">
                 {"  Hint: "}
                 {providerHint}
               </Text>
@@ -1501,8 +1501,10 @@ export function App(props: AppProps) {
       }
       case "info":
         return (
-          <Box key={item.id} marginTop={1}>
-            <Text color={theme.textDim}>{item.text}</Text>
+          <Box key={item.id} marginTop={1} flexShrink={1}>
+            <Text color={theme.textDim} wrap="wrap">
+              {item.text}
+            </Text>
           </Box>
         );
       case "compacting":
