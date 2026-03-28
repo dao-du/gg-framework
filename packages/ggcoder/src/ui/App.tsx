@@ -138,6 +138,7 @@ interface ToolDoneItem {
   result: string;
   isError: boolean;
   durationMs: number;
+  details?: unknown;
   id: string;
 }
 
@@ -990,6 +991,7 @@ export function App(props: AppProps) {
                   result,
                   isError,
                   durationMs,
+                  details,
                   id: startItem.id,
                 };
                 const next = [...prev];
@@ -999,7 +1001,16 @@ export function App(props: AppProps) {
               // Fallback: just append
               return [
                 ...prev,
-                { kind: "tool_done", name, args: {}, result, isError, durationMs, id: getId() },
+                {
+                  kind: "tool_done",
+                  name,
+                  args: {},
+                  result,
+                  isError,
+                  durationMs,
+                  details,
+                  id: getId(),
+                },
               ];
             });
           }
@@ -1662,6 +1673,7 @@ export function App(props: AppProps) {
             args={item.args}
             result={item.result}
             isError={item.isError}
+            details={item.details}
           />
         );
       case "tool_group":
