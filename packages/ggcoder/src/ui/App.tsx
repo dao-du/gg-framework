@@ -294,6 +294,46 @@ function compactHistory(items: CompletedItem[]): CompletedItem[] {
 
 // flushOnTurnText, flushOnTurnEnd are imported from ./live-item-flush.ts
 
+/** Check whether an item is still active (running spinner, pending result). */
+function isActiveItem(item: CompletedItem): boolean {
+  switch (item.kind) {
+    case "tool_start":
+    case "server_tool_start":
+    case "compacting":
+      return true;
+    case "tool_group":
+      return (item as ToolGroupItem).tools.some((t) => t.status === "running");
+    case "subagent_group":
+      return (item as SubAgentGroupItem).agents.some((a) => a.status === "running");
+    default:
+      return false;
+  }
+}
+
+/**
+ * Partition live items into completed (flushable to Static) and still-active.
+ * Completed items precede active ones — we flush the longest contiguous prefix
+ * of completed items to keep ordering stable.
+ */
+function partitionCompleted(items: CompletedItem[]): {
+  flushed: CompletedItem[];
+  remaining: CompletedItem[];
+} {
+  // Find the first active item — everything before it is safe to flush
+  const firstActiveIdx = items.findIndex(isActiveItem);
+  if (firstActiveIdx === -1) {
+    // All items are completed
+    return { flushed: items, remaining: [] };
+  }
+  if (firstActiveIdx === 0) {
+    return { flushed: [], remaining: items };
+  }
+  return {
+    flushed: items.slice(0, firstActiveIdx),
+    remaining: items.slice(firstActiveIdx),
+  };
+}
+
 // ── Duration summary ─────────────────────────────────────
 
 function formatDuration(ms: number): string {
@@ -866,6 +906,18 @@ export function App(props: AppProps) {
       onToolStart: useCallback(
         (toolCallId: string, name: string, args: Record<string, unknown>) => {
           log("INFO", "tool", `Tool call started: ${name}`, { id: toolCallId });
+
+          // Flush completed items (assistant text, finished tools) to Static
+          // before adding tool UI. Keeping both in the live area makes it tall
+          // and causes Ink's cursor math to clip the top.
+          setLiveItems((prev) => {
+            const { flushed, remaining } = partitionCompleted(prev);
+            if (flushed.length > 0) {
+              setHistory((h) => compactHistory([...h, ...trimFlushedItems(flushed)]));
+            }
+            return remaining;
+          });
+
           if (name === "subagent") {
             // Create or update the sub-agent group item
             const newAgent: SubAgentInfo = {
@@ -983,7 +1035,13 @@ export function App(props: AppProps) {
 
               const next = [...prev];
               next[groupIdx] = { ...group, agents: updatedAgents };
-              return next;
+
+              // Flush completed items to Static to keep the live area small
+              const { flushed, remaining } = partitionCompleted(next);
+              if (flushed.length > 0) {
+                setHistory((h) => compactHistory([...h, ...trimFlushedItems(flushed)]));
+              }
+              return remaining;
             });
           } else {
             setLiveItems((prev) => {
@@ -993,10 +1051,11 @@ export function App(props: AppProps) {
                   item.kind === "tool_group" &&
                   (item as ToolGroupItem).tools.some((t) => t.toolCallId === toolCallId),
               );
+              let updated: CompletedItem[];
               if (groupIdx !== -1) {
                 const group = prev[groupIdx] as ToolGroupItem;
-                const next = [...prev];
-                next[groupIdx] = {
+                updated = [...prev];
+                updated[groupIdx] = {
                   ...group,
                   tools: group.tools.map((t) =>
                     t.toolCallId === toolCallId
@@ -1004,43 +1063,49 @@ export function App(props: AppProps) {
                       : t,
                   ),
                 };
-                return next;
+              } else {
+                // Find the matching tool_start and replace it with tool_done
+                const startIdx = prev.findIndex(
+                  (item) => item.kind === "tool_start" && item.toolCallId === toolCallId,
+                );
+                if (startIdx !== -1) {
+                  const startItem = prev[startIdx] as ToolStartItem;
+                  const doneItem: ToolDoneItem = {
+                    kind: "tool_done",
+                    name,
+                    args: startItem.args,
+                    result,
+                    isError,
+                    durationMs,
+                    details,
+                    id: startItem.id,
+                  };
+                  updated = [...prev];
+                  updated[startIdx] = doneItem;
+                } else {
+                  // Fallback: just append
+                  updated = [
+                    ...prev,
+                    {
+                      kind: "tool_done",
+                      name,
+                      args: {},
+                      result,
+                      isError,
+                      durationMs,
+                      details,
+                      id: getId(),
+                    },
+                  ];
+                }
               }
 
-              // Find the matching tool_start and replace it with tool_done
-              const startIdx = prev.findIndex(
-                (item) => item.kind === "tool_start" && item.toolCallId === toolCallId,
-              );
-              if (startIdx !== -1) {
-                const startItem = prev[startIdx] as ToolStartItem;
-                const doneItem: ToolDoneItem = {
-                  kind: "tool_done",
-                  name,
-                  args: startItem.args,
-                  result,
-                  isError,
-                  durationMs,
-                  details,
-                  id: startItem.id,
-                };
-                const next = [...prev];
-                next[startIdx] = doneItem;
-                return next;
+              // Flush completed items to Static to keep the live area small
+              const { flushed, remaining } = partitionCompleted(updated);
+              if (flushed.length > 0) {
+                setHistory((h) => compactHistory([...h, ...trimFlushedItems(flushed)]));
               }
-              // Fallback: just append
-              return [
-                ...prev,
-                {
-                  kind: "tool_done",
-                  name,
-                  args: {},
-                  result,
-                  isError,
-                  durationMs,
-                  details,
-                  id: getId(),
-                },
-              ];
+              return remaining;
             });
           }
         },
@@ -1048,21 +1113,30 @@ export function App(props: AppProps) {
       ),
       onServerToolCall: useCallback((id: string, name: string, input: unknown) => {
         log("INFO", "server_tool", `Server tool call: ${name}`, { id });
-        setLiveItems((prev) => [
-          ...prev,
-          {
-            kind: "server_tool_start",
-            serverToolCallId: id,
-            name,
-            input,
-            startedAt: Date.now(),
-            id: getId(),
-          },
-        ]);
+        // Flush completed items (including assistant text) to Static before
+        // adding server tool UI — same rationale as onToolStart.
+        setLiveItems((prev) => {
+          const { flushed, remaining } = partitionCompleted(prev);
+          if (flushed.length > 0) {
+            setHistory((h) => compactHistory([...h, ...trimFlushedItems(flushed)]));
+          }
+          return [
+            ...remaining,
+            {
+              kind: "server_tool_start",
+              serverToolCallId: id,
+              name,
+              input,
+              startedAt: Date.now(),
+              id: getId(),
+            },
+          ];
+        });
       }, []),
       onServerToolResult: useCallback((toolUseId: string, resultType: string, data: unknown) => {
         log("INFO", "server_tool", `Server tool result`, { toolUseId, resultType });
         setLiveItems((prev) => {
+          let updated: CompletedItem[];
           const startIdx = prev.findIndex(
             (item) => item.kind === "server_tool_start" && item.serverToolCallId === toolUseId,
           );
@@ -1077,22 +1151,28 @@ export function App(props: AppProps) {
               durationMs: Date.now() - startItem.startedAt,
               id: startItem.id,
             };
-            const next = [...prev];
-            next[startIdx] = doneItem;
-            return next;
+            updated = [...prev];
+            updated[startIdx] = doneItem;
+          } else {
+            updated = [
+              ...prev,
+              {
+                kind: "server_tool_done",
+                name: "unknown",
+                input: {},
+                resultType,
+                data,
+                durationMs: 0,
+                id: getId(),
+              },
+            ];
           }
-          return [
-            ...prev,
-            {
-              kind: "server_tool_done",
-              name: "unknown",
-              input: {},
-              resultType,
-              data,
-              durationMs: 0,
-              id: getId(),
-            },
-          ];
+          // Flush completed items to Static
+          const { flushed, remaining } = partitionCompleted(updated);
+          if (flushed.length > 0) {
+            setHistory((h) => compactHistory([...h, ...trimFlushedItems(flushed)]));
+          }
+          return remaining;
         });
       }, []),
       onTurnEnd: useCallback(
