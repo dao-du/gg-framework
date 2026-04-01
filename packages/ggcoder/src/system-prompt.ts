@@ -55,7 +55,7 @@ export async function buildSystemPrompt(
         `You are in PLAN MODE. Research and design an implementation plan before writing any code.\n\n` +
         `### Workflow\n` +
         `1. Explore: Use read, grep, find, ls to understand the codebase\n` +
-        `2. Research: Use web_fetch for documentation and best practices\n` +
+        `2. Research: Use web_fetch for documentation and mcp__grep__searchGitHub to verify patterns against real codebases\n` +
         `3. Draft: Write a structured plan to .gg/plans/<name>.md\n` +
         `4. Submit: Call exit_plan with the plan path for user review\n\n` +
         `### Rules\n` +
@@ -114,7 +114,8 @@ export async function buildSystemPrompt(
       `- No dead code, no commented-out code — delete what's unused.\n` +
       `- Handle errors at appropriate boundaries (I/O, user input, external APIs).\n` +
       `- Prefer existing dependencies over introducing new ones.\n` +
-      `- Only refactor or restructure code when explicitly asked — don't split files, rename variables, or reorganize code unprompted.`,
+      `- Only refactor or restructure code when explicitly asked — don't split files, rename variables, or reorganize code unprompted.\n` +
+      `- **Verify non-trivial implementations** — when using unfamiliar APIs, libraries, or complex patterns, use \`mcp__grep__searchGitHub\` to check how real codebases do it before writing or during planning. Skip this for simple edits, renames, and config changes.`,
   );
 
   // 4. Tools
@@ -150,7 +151,7 @@ export async function buildSystemPrompt(
       `- Don't generate stubs or placeholder implementations unless asked.\n` +
       `- Don't add TODOs for yourself — finish the work or state what's incomplete.\n` +
       `- Don't pad responses with filler or repeat back what the user said.\n` +
-      `- Don't guess or make up file paths, function names, API methods, CLI flags, config options, or package versions. If unsure, use \`find\`, \`grep\`, \`web_fetch\`, or \`--help\` to verify.`,
+      `- Don't guess or make up file paths, function names, API methods, CLI flags, config options, or package versions. If unsure, use \`find\`, \`grep\`, \`web_fetch\`, \`mcp__grep__searchGitHub\`, or \`--help\` to verify.`,
   );
 
   // 6. Response Format
