@@ -27,7 +27,7 @@ So OpenClaw has to connect via its `exec` tool, running a Python/socat script th
 ### Step 1: Rebuild ggcoder
 
 ```bash
-cd /home/light/gg-framework-rc && pnpm build
+cd ~/gg-framework-rc && pnpm build
 cd packages/ggcoder && npm install -g .
 ```
 
@@ -39,7 +39,7 @@ Either start fresh or type `/rc` in an existing session:
 ggcoder --rc
 ```
 
-Note the socket path shown in the banner (e.g. `/home/light/.gg/rc-XXXXX.sock`).
+Note the socket path shown in the banner (e.g. `~/.gg/rc-XXXXX.sock`).
 
 ### Step 3: Run the test script
 
@@ -134,7 +134,7 @@ client.close()
 
 **If the fix works** (after rebuild):
 ```
-Connecting to /home/light/.gg/rc-XXXXX.sock
+Connecting to ~/.gg/rc-XXXXX.sock
 Sent prompt: Say exactly: RC_EVENT_STREAM_WORKING and nothing else.
   [turn] #1 reason=end_turn tokens={...}
 

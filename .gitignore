@@ -5,7 +5,10 @@ dist/
 # Auth & secrets
 .env
 .env.*
-~/.gg/
+
+# GGCoder local session/plan data
+.gg/plans/
+.gg/sessions/
 
 # OS
 .DS_Store
