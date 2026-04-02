@@ -984,19 +984,19 @@ export function App(props: AppProps) {
         // This keeps liveItems bounded per-turn, preventing Ink's live area from
         // growing unbounded, which makes Ink's live-area re-renders expensive.
         //
-        // IMPORTANT: setHistory must be called OUTSIDE the setLiveItems updater
-        // (not nested inside it) so React can batch both updates into one render.
-        // Nesting caused the flushed items to appear in history while still
-        // visible in liveItems for one frame — producing brief visual duplicates.
-        let turnTextFlushed: CompletedItem[] = [];
+        // Items are queued in pendingFlushRef (not sent to setHistory directly)
+        // so the Static write happens in a SEPARATE render cycle from the
+        // live-area change — avoiding both Ink cursor-math clipping and the
+        // brief duplicate that occurred when setHistory was nested inside the
+        // setLiveItems updater.
         setLiveItems((prev) => {
-          turnTextFlushed = flushOnTurnText(prev);
+          const flushed = flushOnTurnText(prev);
+          if (flushed.length > 0) {
+            pendingFlushRef.current = [...pendingFlushRef.current, ...flushed];
+          }
           const displayText = planStepsRef.current.length > 0 ? stripDoneMarkers(text) : text;
           return [{ kind: "assistant", text: displayText, thinking, thinkingMs, id: getId() }];
         });
-        if (turnTextFlushed.length > 0) {
-          setHistory((h) => compactHistory([...h, ...trimFlushedItems(turnTextFlushed)]));
-        }
       }, []),
       onToolStart: useCallback(
         (toolCallId: string, name: string, args: Record<string, unknown>) => {
@@ -1005,15 +1005,13 @@ export function App(props: AppProps) {
           // Flush completed items (assistant text, finished tools) to Static
           // before adding tool UI. Keeping both in the live area makes it tall
           // and causes Ink's cursor math to clip the top.
-          let toolStartFlushed: CompletedItem[] = [];
           setLiveItems((prev) => {
             const { flushed, remaining } = partitionCompleted(prev);
-            toolStartFlushed = flushed;
+            if (flushed.length > 0) {
+              pendingFlushRef.current = [...pendingFlushRef.current, ...flushed];
+            }
             return remaining;
           });
-          if (toolStartFlushed.length > 0) {
-            setHistory((h) => compactHistory([...h, ...trimFlushedItems(toolStartFlushed)]));
-          }
 
           if (name === "subagent") {
             // Create or update the sub-agent group item
@@ -1112,7 +1110,6 @@ export function App(props: AppProps) {
             isError: String(isError),
           });
           if (name === "subagent") {
-            let saFlushed: CompletedItem[] = [];
             setLiveItems((prev) => {
               const groupIdx = prev.findIndex((item) => item.kind === "subagent_group");
               if (groupIdx === -1) return prev;
@@ -1136,14 +1133,12 @@ export function App(props: AppProps) {
 
               // Flush completed items to Static to keep the live area small
               const { flushed, remaining } = partitionCompleted(next);
-              saFlushed = flushed;
+              if (flushed.length > 0) {
+                pendingFlushRef.current = [...pendingFlushRef.current, ...flushed];
+              }
               return remaining;
             });
-            if (saFlushed.length > 0) {
-              setHistory((h) => compactHistory([...h, ...trimFlushedItems(saFlushed)]));
-            }
           } else {
-            let toolEndFlushed: CompletedItem[] = [];
             setLiveItems((prev) => {
               // Check if this tool is in a tool_group
               const groupIdx = prev.findIndex(
@@ -1202,12 +1197,11 @@ export function App(props: AppProps) {
 
               // Flush completed items to Static to keep the live area small
               const { flushed, remaining } = partitionCompleted(updated);
-              toolEndFlushed = flushed;
+              if (flushed.length > 0) {
+                pendingFlushRef.current = [...pendingFlushRef.current, ...flushed];
+              }
               return remaining;
             });
-            if (toolEndFlushed.length > 0) {
-              setHistory((h) => compactHistory([...h, ...trimFlushedItems(toolEndFlushed)]));
-            }
           }
         },
         [],
@@ -1216,10 +1210,11 @@ export function App(props: AppProps) {
         log("INFO", "server_tool", `Server tool call: ${name}`, { id });
         // Flush completed items (including assistant text) to Static before
         // adding server tool UI — same rationale as onToolStart.
-        let serverCallFlushed: CompletedItem[] = [];
         setLiveItems((prev) => {
           const { flushed, remaining } = partitionCompleted(prev);
-          serverCallFlushed = flushed;
+          if (flushed.length > 0) {
+            pendingFlushRef.current = [...pendingFlushRef.current, ...flushed];
+          }
           return [
             ...remaining,
             {
@@ -1232,13 +1227,9 @@ export function App(props: AppProps) {
             },
           ];
         });
-        if (serverCallFlushed.length > 0) {
-          setHistory((h) => compactHistory([...h, ...trimFlushedItems(serverCallFlushed)]));
-        }
       }, []),
       onServerToolResult: useCallback((toolUseId: string, resultType: string, data: unknown) => {
         log("INFO", "server_tool", `Server tool result`, { toolUseId, resultType });
-        let serverResultFlushed: CompletedItem[] = [];
         setLiveItems((prev) => {
           let updated: CompletedItem[];
           const startIdx = prev.findIndex(
@@ -1273,12 +1264,11 @@ export function App(props: AppProps) {
           }
           // Flush completed items to Static
           const { flushed, remaining } = partitionCompleted(updated);
-          serverResultFlushed = flushed;
+          if (flushed.length > 0) {
+            pendingFlushRef.current = [...pendingFlushRef.current, ...flushed];
+          }
           return remaining;
         });
-        if (serverResultFlushed.length > 0) {
-          setHistory((h) => compactHistory([...h, ...trimFlushedItems(serverResultFlushed)]));
-        }
       }, []),
       onTurnEnd: useCallback(
         (
@@ -1303,15 +1293,13 @@ export function App(props: AppProps) {
             usage.inputTokens + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
           // For tool-only turns (no text), flush completed items to Static so
           // liveItems doesn't grow unbounded across consecutive tool-only turns.
-          let turnEndFlushed: CompletedItem[] = [];
           setLiveItems((prev) => {
             const { flushed, remaining } = flushOnTurnEnd(prev, stopReason);
-            turnEndFlushed = flushed;
+            if (flushed.length > 0) {
+              pendingFlushRef.current = [...pendingFlushRef.current, ...flushed];
+            }
             return remaining;
           });
-          if (turnEndFlushed.length > 0) {
-            setHistory((h) => compactHistory([...h, ...trimFlushedItems(turnEndFlushed)]));
-          }
         },
         [],
       ),
@@ -1333,7 +1321,7 @@ export function App(props: AppProps) {
         // a live-area height change in the same frame.
         setLiveItems((prev) => {
           if (prev.length > 0) {
-            pendingFlushRef.current = prev;
+            pendingFlushRef.current = [...pendingFlushRef.current, ...prev];
           }
           return [];
         });
@@ -1415,14 +1403,12 @@ export function App(props: AppProps) {
           typeof content === "string"
             ? undefined
             : content.filter((c) => c.type === "image").length || undefined;
-        let userMsgFlushed: CompletedItem[] = [];
         setLiveItems((prev) => {
-          userMsgFlushed = prev;
+          if (prev.length > 0) {
+            pendingFlushRef.current = [...pendingFlushRef.current, ...prev];
+          }
           return [];
         });
-        if (userMsgFlushed.length > 0) {
-          setHistory((h) => compactHistory([...h, ...trimFlushedItems(userMsgFlushed)]));
-        }
         const userItem: UserItem = {
           kind: "user",
           text: displayText,
@@ -1610,14 +1596,12 @@ export function App(props: AppProps) {
           );
 
           // Move live items into history before starting
-          let cmdFlushed: CompletedItem[] = [];
           setLiveItems((prev) => {
-            cmdFlushed = prev;
+            if (prev.length > 0) {
+              pendingFlushRef.current = [...pendingFlushRef.current, ...prev];
+            }
             return [];
           });
-          if (cmdFlushed.length > 0) {
-            setHistory((h) => compactHistory([...h, ...trimFlushedItems(cmdFlushed)]));
-          }
 
           // Show the command name as the user message
           const userItem: UserItem = { kind: "user", text: trimmed, id: getId() };
@@ -1723,14 +1707,12 @@ export function App(props: AppProps) {
       }
 
       // Move any remaining live items into history (Static) before starting new turn
-      let submitFlushed: CompletedItem[] = [];
       setLiveItems((prev) => {
-        submitFlushed = prev;
+        if (prev.length > 0) {
+          pendingFlushRef.current = [...pendingFlushRef.current, ...prev];
+        }
         return [];
       });
-      if (submitFlushed.length > 0) {
-        setHistory((h) => compactHistory([...h, ...trimFlushedItems(submitFlushed)]));
-      }
 
       // Build display text — strip image paths, show badges instead
       let displayText = input;
