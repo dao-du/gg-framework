@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { playNotificationSound } from "../utils/sound.js";
 import type { Message, Provider, ThinkingLevel, TextContent, ImageContent } from "@kenkaiiii/gg-ai";
 import { extractImagePaths, type ImageAttachment } from "../utils/image.js";
-import type { AgentTool } from "@kenkaiiii/gg-agent";
+import type { AgentTool, AgentEvent } from "@kenkaiiii/gg-agent";
 import { useAgentLoop, type UserContent } from "./hooks/useAgentLoop.js";
 import { UserMessage } from "./components/UserMessage.js";
 import type { PasteInfo } from "./components/InputArea.js";
@@ -1496,6 +1496,80 @@ export function App(props: AppProps) {
         setDoneStatus(null);
         setLiveItems([userItem]);
       }, []),
+      // Broadcast raw agent events to remote control socket clients
+      onRawEvent: useCallback(
+        (event: AgentEvent) => {
+          const rc = rcServerRef.current;
+          if (!rc || rc.clientCount === 0) return;
+          switch (event.type) {
+            case "text_delta":
+              rc.broadcast({ type: "text_delta", text: event.text });
+              break;
+            case "thinking_delta":
+              rc.broadcast({ type: "thinking_delta", text: event.text });
+              break;
+            case "tool_call_start":
+              rc.broadcast({
+                type: "tool_call_start",
+                toolCallId: event.toolCallId,
+                name: event.name,
+                args: event.args,
+              });
+              break;
+            case "tool_call_update":
+              rc.broadcast({
+                type: "tool_call_update",
+                toolCallId: event.toolCallId,
+                update: event.update,
+              });
+              break;
+            case "tool_call_end":
+              rc.broadcast({
+                type: "tool_call_end",
+                toolCallId: event.toolCallId,
+                result: event.result,
+                isError: event.isError,
+                durationMs: event.durationMs,
+              });
+              break;
+            case "server_tool_call":
+              rc.broadcast({
+                type: "server_tool_call",
+                id: event.id,
+                name: event.name,
+                input: event.input,
+              });
+              break;
+            case "server_tool_result":
+              rc.broadcast({
+                type: "server_tool_result",
+                toolUseId: event.toolUseId,
+                resultType: event.resultType,
+                data: event.data,
+              });
+              break;
+            case "turn_end":
+              rc.broadcast({
+                type: "turn_end",
+                turn: event.turn,
+                stopReason: event.stopReason,
+                usage: event.usage,
+              });
+              break;
+            case "agent_done":
+              rc.broadcast({
+                type: "agent_done",
+                totalTurns: event.totalTurns,
+                totalUsage: event.totalUsage,
+              });
+              break;
+            case "error":
+              rc.broadcast({ type: "error", message: event.error.message });
+              break;
+          }
+        },
+        [],
+      ),
     },
   );
 
