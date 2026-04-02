@@ -604,9 +604,9 @@ export class AgentSession {
       },
       getModelList: () => {
         const current = `Current: ${this.provider}:${this.model}\n\nAvailable models:\n`;
-        const list = getAllModels().map((m) => `  ${m.provider}:${m.id} — ${m.name} (${m.costTier})`).join(
-          "\n",
-        );
+        const list = getAllModels()
+          .map((m) => `  ${m.provider}:${m.id} — ${m.name} (${m.costTier})`)
+          .join("\n");
         return current + list;
       },
       quit: () => {
