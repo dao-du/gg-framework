@@ -9,7 +9,7 @@ import { playNotificationSound } from "../utils/sound.js";
 import type { Message, Provider, ThinkingLevel, TextContent, ImageContent } from "@kenkaiiii/gg-ai";
 import { extractImagePaths, type ImageAttachment } from "../utils/image.js";
 import type { AgentTool } from "@kenkaiiii/gg-agent";
-import { useAgentLoop, type ActivityPhase, type UserContent } from "./hooks/useAgentLoop.js";
+import { useAgentLoop, type UserContent } from "./hooks/useAgentLoop.js";
 import { UserMessage } from "./components/UserMessage.js";
 import type { PasteInfo } from "./components/InputArea.js";
 import { AssistantMessage } from "./components/AssistantMessage.js";
@@ -38,10 +38,12 @@ import {
   deriveFrame,
 } from "./components/AnimationContext.js";
 import { useTerminalTitle } from "./hooks/useTerminalTitle.js";
+import { useTerminalProgress } from "./hooks/useTerminalProgress.js";
 import { getGitBranch } from "../utils/git.js";
 import { getModel, getContextWindow } from "../core/model-registry.js";
 import { SessionManager, type MessageEntry } from "../core/session-manager.js";
 import { log } from "../core/logger.js";
+import { generateSessionTitle } from "../utils/session-title.js";
 import { SettingsManager } from "../core/settings-manager.js";
 import { shouldCompact, compact } from "../core/compaction/compactor.js";
 import { estimateConversationTokens } from "../core/compaction/token-estimator.js";
@@ -60,6 +62,7 @@ import type { MCPClientManager } from "../core/mcp/index.js";
 import { getMCPServers } from "../core/mcp/index.js";
 import type { AuthStorage } from "../core/auth-storage.js";
 import { trimFlushedItems, flushOnTurnText, flushOnTurnEnd } from "./live-item-flush.js";
+import { Buddy } from "./buddy/Buddy.js";
 
 // ── Provider Error Hints ──────────────────────────────────
 
@@ -502,15 +505,12 @@ export function App(props: AppProps) {
 
   // Terminal title — updated later after agentLoop is created
   // (hoisted here so the hook is always called in the same order)
-  const [titlePhase, setTitlePhase] = useState<ActivityPhase>("idle");
   const [titleRunning, setTitleRunning] = useState(false);
-  const [titleToolNames, setTitleToolNames] = useState<string[]>([]);
+  const [sessionTitle, setSessionTitle] = useState<string | undefined>(undefined);
+  const sessionTitleGeneratedRef = useRef(false);
   useTerminalTitle({
-    phase: titlePhase,
     isRunning: titleRunning,
-    userMessage: lastUserMessage,
-    activeToolNames: titleToolNames,
-    planMode,
+    sessionTitle,
   });
 
   // Items scrolled into Static (history).  For restored sessions, skip the
@@ -680,13 +680,15 @@ export function App(props: AppProps) {
 
   // ── Compaction ─────────────────────────────────────────
 
-  // Load settings for auto-compaction
+  // Load settings for auto-compaction + buddy
   const settingsRef = useRef<SettingsManager | null>(null);
+  const [buddyEnabled, setBuddyEnabled] = useState(false);
   useEffect(() => {
     if (props.settingsFile) {
       const sm = new SettingsManager(props.settingsFile);
       sm.load().then(() => {
         settingsRef.current = sm;
+        setBuddyEnabled(sm.get("buddyEnabled") ?? false);
       });
     }
   }, [props.settingsFile]);
@@ -900,8 +902,71 @@ export function App(props: AppProps) {
           planStepsRef.current = [];
           setPlanSteps([]);
           approvedPlanPathRef.current = undefined;
+          // Rebuild system prompt to remove the completed plan from context
+          void (async () => {
+            const newPrompt = await buildSystemPrompt(props.cwd, props.skills, planMode, undefined);
+            if (messagesRef.current[0]?.role === "system") {
+              messagesRef.current[0] = { role: "system" as const, content: newPrompt };
+            }
+          })();
         }
-      }, [persistNewMessages]),
+
+        // Generate session title after the first turn (background, best-effort)
+        if (!sessionTitleGeneratedRef.current) {
+          sessionTitleGeneratedRef.current = true;
+          const msgs = messagesRef.current;
+          // Find the first user message and first assistant text
+          const userMsg = msgs.find((m) => m.role === "user");
+          const assistantMsg = msgs.find((m) => m.role === "assistant");
+          const userText =
+            typeof userMsg?.content === "string"
+              ? userMsg.content
+              : Array.isArray(userMsg?.content)
+                ? userMsg.content
+                    .filter((c): c is { type: "text"; text: string } => c.type === "text")
+                    .map((c) => c.text)
+                    .join(" ")
+                : "";
+          const assistantText =
+            typeof assistantMsg?.content === "string"
+              ? assistantMsg.content
+              : Array.isArray(assistantMsg?.content)
+                ? assistantMsg.content
+                    .filter((c): c is { type: "text"; text: string } => c.type === "text")
+                    .map((c) => c.text)
+                    .join(" ")
+                : "";
+          if (userText) {
+            generateSessionTitle({
+              provider: currentProvider,
+              userMessage: userText,
+              assistantPreview: assistantText.slice(0, 200),
+              apiKey: activeApiKey,
+              baseUrl: props.baseUrl,
+              accountId: activeAccountId,
+              resolveCredentials,
+            }).then(
+              (title) => {
+                setSessionTitle(title);
+                log("INFO", "title", `Session title generated: ${title}`);
+              },
+              () => {
+                // Best-effort — silently ignore failures
+              },
+            );
+          }
+        }
+      }, [
+        persistNewMessages,
+        planMode,
+        props.cwd,
+        props.skills,
+        currentProvider,
+        activeApiKey,
+        activeAccountId,
+        props.baseUrl,
+        resolveCredentials,
+      ]),
       onTurnText: useCallback((text: string, thinking: string, thinkingMs: number) => {
         // Track [DONE:n] markers for plan step progress
         if (planStepsRef.current.length > 0) {
@@ -918,14 +983,20 @@ export function App(props: AppProps) {
         // Flush all completed items from the previous turn to Static history.
         // This keeps liveItems bounded per-turn, preventing Ink's live area from
         // growing unbounded, which makes Ink's live-area re-renders expensive.
+        //
+        // IMPORTANT: setHistory must be called OUTSIDE the setLiveItems updater
+        // (not nested inside it) so React can batch both updates into one render.
+        // Nesting caused the flushed items to appear in history while still
+        // visible in liveItems for one frame — producing brief visual duplicates.
+        let turnTextFlushed: CompletedItem[] = [];
         setLiveItems((prev) => {
-          const flushed = flushOnTurnText(prev);
-          if (flushed.length > 0) {
-            setHistory((h) => compactHistory([...h, ...trimFlushedItems(flushed)]));
-          }
+          turnTextFlushed = flushOnTurnText(prev);
           const displayText = planStepsRef.current.length > 0 ? stripDoneMarkers(text) : text;
           return [{ kind: "assistant", text: displayText, thinking, thinkingMs, id: getId() }];
         });
+        if (turnTextFlushed.length > 0) {
+          setHistory((h) => compactHistory([...h, ...trimFlushedItems(turnTextFlushed)]));
+        }
       }, []),
       onToolStart: useCallback(
         (toolCallId: string, name: string, args: Record<string, unknown>) => {
@@ -934,13 +1005,15 @@ export function App(props: AppProps) {
           // Flush completed items (assistant text, finished tools) to Static
           // before adding tool UI. Keeping both in the live area makes it tall
           // and causes Ink's cursor math to clip the top.
+          let toolStartFlushed: CompletedItem[] = [];
           setLiveItems((prev) => {
             const { flushed, remaining } = partitionCompleted(prev);
-            if (flushed.length > 0) {
-              setHistory((h) => compactHistory([...h, ...trimFlushedItems(flushed)]));
-            }
+            toolStartFlushed = flushed;
             return remaining;
           });
+          if (toolStartFlushed.length > 0) {
+            setHistory((h) => compactHistory([...h, ...trimFlushedItems(toolStartFlushed)]));
+          }
 
           if (name === "subagent") {
             // Create or update the sub-agent group item
@@ -1039,6 +1112,7 @@ export function App(props: AppProps) {
             isError: String(isError),
           });
           if (name === "subagent") {
+            let saFlushed: CompletedItem[] = [];
             setLiveItems((prev) => {
               const groupIdx = prev.findIndex((item) => item.kind === "subagent_group");
               if (groupIdx === -1) return prev;
@@ -1062,12 +1136,14 @@ export function App(props: AppProps) {
 
               // Flush completed items to Static to keep the live area small
               const { flushed, remaining } = partitionCompleted(next);
-              if (flushed.length > 0) {
-                setHistory((h) => compactHistory([...h, ...trimFlushedItems(flushed)]));
-              }
+              saFlushed = flushed;
               return remaining;
             });
+            if (saFlushed.length > 0) {
+              setHistory((h) => compactHistory([...h, ...trimFlushedItems(saFlushed)]));
+            }
           } else {
+            let toolEndFlushed: CompletedItem[] = [];
             setLiveItems((prev) => {
               // Check if this tool is in a tool_group
               const groupIdx = prev.findIndex(
@@ -1126,11 +1202,12 @@ export function App(props: AppProps) {
 
               // Flush completed items to Static to keep the live area small
               const { flushed, remaining } = partitionCompleted(updated);
-              if (flushed.length > 0) {
-                setHistory((h) => compactHistory([...h, ...trimFlushedItems(flushed)]));
-              }
+              toolEndFlushed = flushed;
               return remaining;
             });
+            if (toolEndFlushed.length > 0) {
+              setHistory((h) => compactHistory([...h, ...trimFlushedItems(toolEndFlushed)]));
+            }
           }
         },
         [],
@@ -1139,11 +1216,10 @@ export function App(props: AppProps) {
         log("INFO", "server_tool", `Server tool call: ${name}`, { id });
         // Flush completed items (including assistant text) to Static before
         // adding server tool UI — same rationale as onToolStart.
+        let serverCallFlushed: CompletedItem[] = [];
         setLiveItems((prev) => {
           const { flushed, remaining } = partitionCompleted(prev);
-          if (flushed.length > 0) {
-            setHistory((h) => compactHistory([...h, ...trimFlushedItems(flushed)]));
-          }
+          serverCallFlushed = flushed;
           return [
             ...remaining,
             {
@@ -1156,9 +1232,13 @@ export function App(props: AppProps) {
             },
           ];
         });
+        if (serverCallFlushed.length > 0) {
+          setHistory((h) => compactHistory([...h, ...trimFlushedItems(serverCallFlushed)]));
+        }
       }, []),
       onServerToolResult: useCallback((toolUseId: string, resultType: string, data: unknown) => {
         log("INFO", "server_tool", `Server tool result`, { toolUseId, resultType });
+        let serverResultFlushed: CompletedItem[] = [];
         setLiveItems((prev) => {
           let updated: CompletedItem[];
           const startIdx = prev.findIndex(
@@ -1193,11 +1273,12 @@ export function App(props: AppProps) {
           }
           // Flush completed items to Static
           const { flushed, remaining } = partitionCompleted(updated);
-          if (flushed.length > 0) {
-            setHistory((h) => compactHistory([...h, ...trimFlushedItems(flushed)]));
-          }
+          serverResultFlushed = flushed;
           return remaining;
         });
+        if (serverResultFlushed.length > 0) {
+          setHistory((h) => compactHistory([...h, ...trimFlushedItems(serverResultFlushed)]));
+        }
       }, []),
       onTurnEnd: useCallback(
         (
@@ -1222,13 +1303,15 @@ export function App(props: AppProps) {
             usage.inputTokens + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
           // For tool-only turns (no text), flush completed items to Static so
           // liveItems doesn't grow unbounded across consecutive tool-only turns.
+          let turnEndFlushed: CompletedItem[] = [];
           setLiveItems((prev) => {
             const { flushed, remaining } = flushOnTurnEnd(prev, stopReason);
-            if (flushed.length > 0) {
-              setHistory((h) => compactHistory([...h, ...trimFlushedItems(flushed)]));
-            }
+            turnEndFlushed = flushed;
             return remaining;
           });
+          if (turnEndFlushed.length > 0) {
+            setHistory((h) => compactHistory([...h, ...trimFlushedItems(turnEndFlushed)]));
+          }
         },
         [],
       ),
@@ -1332,12 +1415,14 @@ export function App(props: AppProps) {
           typeof content === "string"
             ? undefined
             : content.filter((c) => c.type === "image").length || undefined;
+        let userMsgFlushed: CompletedItem[] = [];
         setLiveItems((prev) => {
-          if (prev.length > 0) {
-            setHistory((h) => compactHistory([...h, ...trimFlushedItems(prev)]));
-          }
+          userMsgFlushed = prev;
           return [];
         });
+        if (userMsgFlushed.length > 0) {
+          setHistory((h) => compactHistory([...h, ...trimFlushedItems(userMsgFlushed)]));
+        }
         const userItem: UserItem = {
           kind: "user",
           text: displayText,
@@ -1367,12 +1452,12 @@ export function App(props: AppProps) {
   });
 
   // Sync terminal title with agent loop state
-  const activeToolNamesKey = agentLoop.activeToolCalls.map((tc) => tc.name).join(",");
   useEffect(() => {
-    setTitlePhase(agentLoop.activityPhase);
     setTitleRunning(agentLoop.isRunning);
-    setTitleToolNames(agentLoop.activeToolCalls.map((tc) => tc.name));
-  }, [agentLoop.activityPhase, agentLoop.isRunning, activeToolNamesKey]);
+  }, [agentLoop.isRunning]);
+
+  // Terminal progress bar (OSC 9;4) — pulsing bar in supported terminals
+  useTerminalProgress(agentLoop.isRunning, agentLoop.activeToolCalls.length > 0);
 
   // Animated thinking border — derived from global animation tick
   useAnimationActive();
@@ -1429,8 +1514,14 @@ export function App(props: AppProps) {
         approvedPlanPathRef.current = undefined;
         planStepsRef.current = [];
         setPlanSteps([]);
-        messagesRef.current = messagesRef.current.slice(0, 1); // keep system prompt
+        // Rebuild system prompt without the approved plan
+        void (async () => {
+          const newPrompt = await buildSystemPrompt(props.cwd, props.skills, planMode, undefined);
+          messagesRef.current = [{ role: "system" as const, content: newPrompt }];
+        })();
         agentLoop.reset();
+        setSessionTitle(undefined);
+        sessionTitleGeneratedRef.current = false;
         setLiveItems([{ kind: "info", text: "Session cleared.", id: getId() }]);
         return;
       }
@@ -1474,6 +1565,26 @@ export function App(props: AppProps) {
         return;
       }
 
+      // Handle /buddy — toggle companion
+      if (trimmed === "/buddy") {
+        const next = !buddyEnabled;
+        setBuddyEnabled(next);
+        if (settingsRef.current) {
+          settingsRef.current.set("buddyEnabled", next);
+        }
+        setLiveItems((items) => [
+          ...items,
+          {
+            kind: "info" as const,
+            text: next
+              ? "Buddy enabled! Your companion will appear near the prompt."
+              : "Buddy disabled.",
+            id: getId(),
+          },
+        ]);
+        return;
+      }
+
       // Handle /plans — open plan pane
       if (trimmed === "/plans") {
         stdout?.write("\x1b[2J\x1b[3J\x1b[H");
@@ -1499,12 +1610,14 @@ export function App(props: AppProps) {
           );
 
           // Move live items into history before starting
+          let cmdFlushed: CompletedItem[] = [];
           setLiveItems((prev) => {
-            if (prev.length > 0) {
-              setHistory((h) => compactHistory([...h, ...trimFlushedItems(prev)]));
-            }
+            cmdFlushed = prev;
             return [];
           });
+          if (cmdFlushed.length > 0) {
+            setHistory((h) => compactHistory([...h, ...trimFlushedItems(cmdFlushed)]));
+          }
 
           // Show the command name as the user message
           const userItem: UserItem = { kind: "user", text: trimmed, id: getId() };
@@ -1610,12 +1723,14 @@ export function App(props: AppProps) {
       }
 
       // Move any remaining live items into history (Static) before starting new turn
+      let submitFlushed: CompletedItem[] = [];
       setLiveItems((prev) => {
-        if (prev.length > 0) {
-          setHistory((h) => compactHistory([...h, ...trimFlushedItems(prev)]));
-        }
+        submitFlushed = prev;
         return [];
       });
+      if (submitFlushed.length > 0) {
+        setHistory((h) => compactHistory([...h, ...trimFlushedItems(submitFlushed)]));
+      }
 
       // Build display text — strip image paths, show badges instead
       let displayText = input;
@@ -1746,7 +1861,10 @@ export function App(props: AppProps) {
       if (props.settingsFile) {
         const sm = new SettingsManager(props.settingsFile);
         sm.load().then(async () => {
-          await sm.set("defaultProvider", newProvider);
+          await sm.set(
+            "defaultProvider",
+            newProvider as "anthropic" | "openai" | "glm" | "moonshot",
+          );
           await sm.set("defaultModel", newModelId);
         });
       }
@@ -2158,6 +2276,8 @@ export function App(props: AppProps) {
                 thinkingMs={agentLoop.thinkingMs}
                 isThinking={agentLoop.isThinking}
                 tokenEstimate={agentLoop.streamedTokenEstimate}
+                charCountRef={agentLoop.charCountRef}
+                realTokensAccumRef={agentLoop.realTokensAccumRef}
                 userMessage={lastUserMessage}
                 activeToolNames={agentLoop.activeToolCalls.map((tc) => tc.name)}
                 planMode={planMode}
@@ -2238,6 +2358,9 @@ export function App(props: AppProps) {
               planMode={planMode}
             />
           )}
+          {/* Buddy companion */}
+          {buddyEnabled && <Buddy phase={agentLoop.activityPhase} />}
+          {/* Background tasks bar */}
           {bgTasks.length > 0 && (
             <BackgroundTasksBar
               tasks={bgTasks}

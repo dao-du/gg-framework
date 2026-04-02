@@ -75,7 +75,7 @@ export interface AgentLoopOptions {
 export type ActivityPhase = "waiting" | "thinking" | "generating" | "tools" | "retrying" | "idle";
 
 export interface RetryInfo {
-  reason: "overloaded" | "rate_limit" | "empty_response" | "context_overflow";
+  reason: "overloaded" | "rate_limit" | "empty_response" | "context_overflow" | "stream_stall";
   attempt: number;
   maxAttempts: number;
   delayMs: number;
@@ -107,6 +107,11 @@ export interface UseAgentLoopReturn {
   thinkingMs: number;
   isThinking: boolean;
   streamedTokenEstimate: number;
+  /** Raw character count ref — read directly by ActivityIndicator for smooth animation */
+  charCountRef: React.RefObject<number>;
+  /** Accumulated real tokens from completed turns */
+  realTokensAccumRef: React.RefObject<number>;
+  linesChanged: { added: number; removed: number };
 }
 
 export function useAgentLoop(
@@ -167,6 +172,7 @@ export function useAgentLoop(
   const [isThinking, setIsThinking] = useState(false);
   const [streamedTokenEstimate, setStreamedTokenEstimate] = useState(0);
   const [retryInfo, setRetryInfo] = useState<RetryInfo | null>(null);
+  const [linesChanged, setLinesChanged] = useState({ added: 0, removed: 0 });
 
   const abortRef = useRef<AbortController | null>(null);
   const queueRef = useRef<UserContent[]>([]);
@@ -310,7 +316,9 @@ export function useAgentLoop(
               onQueuedStart?.(merged);
               return [{ role: "user" as const, content: merged }];
             },
-            clearToolUses: options.provider === "anthropic",
+            // clearToolUses disabled — causes model to output unsolicited context
+            // summaries ("KEY CONTEXT TO REMEMBER") when it sees gaps from stripped
+            // tool blocks. Normal client-side compaction handles context management.
           });
 
           for await (const event of generator as AsyncIterable<AgentEvent>) {
@@ -395,6 +403,19 @@ export function useAgentLoop(
                   durationMs,
                   event.details,
                 );
+                // Track lines changed for edit tools
+                if (toolName === "edit" && !event.isError) {
+                  const diff =
+                    (event.details as { diff?: string } | undefined)?.diff ?? event.result;
+                  const addedLines = (diff.match(/^\+[^+]/gm) ?? []).length;
+                  const removedLines = (diff.match(/^-[^-]/gm) ?? []).length;
+                  if (addedLines > 0 || removedLines > 0) {
+                    setLinesChanged((prev) => ({
+                      added: prev.added + addedLines,
+                      removed: prev.removed + removedLines,
+                    }));
+                  }
+                }
                 activeToolCallsRef.current = activeToolCallsRef.current.filter(
                   (t) => t.toolCallId !== event.toolCallId,
                 );
@@ -600,5 +621,8 @@ export function useAgentLoop(
     thinkingMs,
     isThinking,
     streamedTokenEstimate,
+    charCountRef,
+    realTokensAccumRef,
+    linesChanged,
   };
 }

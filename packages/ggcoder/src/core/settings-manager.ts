@@ -30,6 +30,7 @@ const SettingsSchema = z.object({
   /** User-defined models — add any Venice (or other provider) model here.
    *  See: curl https://api.venice.ai/api/v1/models for available Venice model IDs. */
   customModels: z.array(CustomModelSchema).optional(),
+  buddyEnabled: z.boolean().default(false),
 });
 
 export type Settings = z.infer<typeof SettingsSchema>;
@@ -43,6 +44,7 @@ export const DEFAULT_SETTINGS: Settings = {
   theme: "auto",
   showTokenUsage: true,
   showThinking: true,
+  buddyEnabled: false,
 };
 
 // ── Settings Manager ───────────────────────────────────────
