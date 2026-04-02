@@ -57,6 +57,7 @@ import { loginOpenAI } from "./core/oauth/openai.js";
 import type { OAuthCredentials, OAuthLoginCallbacks } from "./core/oauth/types.js";
 import chalk from "chalk";
 import { checkAndAutoUpdate } from "./core/auto-update.js";
+import { RemoteControlServer, installCleanupHandlers } from "./core/remote-control.js";
 
 const _require = createRequire(import.meta.url);
 const CLI_VERSION = (_require("../package.json") as { version: string }).version;
@@ -152,6 +153,7 @@ function printHelp(): void {
     ["--system-prompt <text>", "Override the system prompt"],
     ["--json", "JSON output mode (for sub-agents)"],
     ["--rpc", "JSON-RPC mode (for IDE integrations)"],
+    ["--rc, --remote-control", "Enable remote control via Unix socket"],
   ];
   for (const [flag, desc] of opts) {
     console.log(`  ${accent(flag.padEnd(24))} ${dim(desc)}`);
@@ -290,6 +292,8 @@ function main(): void {
       version: { type: "boolean", short: "v" },
       json: { type: "boolean" },
       rpc: { type: "boolean" },
+      "remote-control": { type: "boolean" },
+      rc: { type: "boolean" },
       provider: { type: "string" },
       model: { type: "string" },
       "max-turns": { type: "string" },
@@ -369,7 +373,8 @@ function main(): void {
     // No settings file or invalid JSON — use defaults
   }
 
-  const provider: "anthropic" | "openai" | "glm" | "moonshot" | "venice" = savedProvider ?? "anthropic";
+  const provider: "anthropic" | "openai" | "glm" | "moonshot" | "venice" =
+    savedProvider ?? "anthropic";
 
   function getHardcodedDefault(p: string): string {
     if (p === "openai") return "gpt-5.3-codex";
@@ -385,6 +390,7 @@ function main(): void {
   // Interactive mode (Ink TUI)
   const cwd = process.cwd();
   const continueRecent = subcommand === "continue";
+  const remoteControl = values["remote-control"] || values.rc;
 
   runInkTUI({
     provider,
@@ -393,6 +399,7 @@ function main(): void {
     thinkingLevel,
     continueRecent,
     theme: savedTheme,
+    remoteControl,
   }).catch((err) => {
     log("ERROR", "fatal", err instanceof Error ? err.message : String(err));
     closeLogger();
@@ -411,6 +418,7 @@ async function runInkTUI(opts: {
   continueRecent?: boolean;
   resumeSessionPath?: string;
   theme?: "auto" | "dark" | "light";
+  remoteControl?: boolean;
 }): Promise<void> {
   const { provider, model, cwd } = opts;
 
@@ -575,6 +583,16 @@ async function runInkTUI(opts: {
     log("INFO", "session", `New session created`, { path: sessionPath });
   }
 
+  // Start remote control socket server if --rc / --remote-control was passed
+  let rcServer: RemoteControlServer | undefined;
+  let rcCleanup: (() => void) | undefined;
+  if (opts.remoteControl) {
+    rcServer = new RemoteControlServer();
+    const socketPath = await rcServer.start();
+    rcCleanup = installCleanupHandlers(rcServer);
+    log("INFO", "remote-control", `Remote control active at ${socketPath}`);
+  }
+
   await renderApp({
     provider,
     model,
@@ -601,7 +619,14 @@ async function runInkTUI(opts: {
     onEnterPlanRef,
     onExitPlanRef,
     skills,
+    remoteControl: rcServer,
   });
+
+  // Clean up remote control server
+  if (rcServer) {
+    await rcServer.close();
+    rcCleanup?.();
+  }
 
   closeLogger();
 }
@@ -727,7 +752,8 @@ async function runSessions(): Promise<void> {
     // No settings file — use defaults
   }
 
-  const provider: "anthropic" | "openai" | "glm" | "moonshot" | "venice" = savedProvider ?? "anthropic";
+  const provider: "anthropic" | "openai" | "glm" | "moonshot" | "venice" =
+    savedProvider ?? "anthropic";
 
   function getDefault(p: string): string {
     if (p === "openai") return "gpt-5.3-codex";

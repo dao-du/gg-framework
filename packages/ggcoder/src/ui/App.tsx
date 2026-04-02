@@ -63,6 +63,8 @@ import { getMCPServers } from "../core/mcp/index.js";
 import type { AuthStorage } from "../core/auth-storage.js";
 import { trimFlushedItems, flushOnTurnText, flushOnTurnEnd } from "./live-item-flush.js";
 import { Buddy } from "./buddy/Buddy.js";
+import { RemoteControlBanner } from "./components/RemoteControlBanner.js";
+import type { RemoteControlServer, RcPromptCommand } from "../core/remote-control.js";
 
 // ── Provider Error Hints ──────────────────────────────────
 
@@ -490,6 +492,7 @@ export interface AppProps {
   onEnterPlanRef?: { current: (reason?: string) => void };
   onExitPlanRef?: { current: (planPath: string) => Promise<string> };
   skills?: Skill[];
+  remoteControl?: RemoteControlServer;
 }
 
 // ── App Component ──────────────────────────────────────────
@@ -692,6 +695,66 @@ export function App(props: AppProps) {
       });
     }
   }, [props.settingsFile]);
+
+  // ── Remote control ─────────────────────────────────────
+  const [rcClientCount, setRcClientCount] = useState(0);
+  const rcQueueRef = useRef<RcPromptCommand[]>([]);
+  // For mid-session activation via /rc command
+  const rcServerRef = useRef<RemoteControlServer | null>(props.remoteControl ?? null);
+  const rcCleanupRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    const rc = props.remoteControl;
+    if (!rc) return;
+
+    const onConnection = (count: number) => setRcClientCount(count);
+    const onDisconnection = (count: number) => setRcClientCount(count);
+    const onPrompt = (cmd: RcPromptCommand) => {
+      rcQueueRef.current.push(cmd);
+      // Process queue — if handleSubmit is available, call it
+      processRcQueue();
+    };
+
+    rc.on("prompt", onPrompt);
+    rc.on("connection", onConnection);
+    rc.on("disconnection", onDisconnection);
+
+    return () => {
+      rc.removeListener("prompt", onPrompt);
+      rc.removeListener("connection", onConnection);
+      rc.removeListener("disconnection", onDisconnection);
+      // Clean up mid-session server on unmount
+      if (rcCleanupRef.current) {
+        rcCleanupRef.current();
+        rcCleanupRef.current = null;
+      }
+      if (rcServerRef.current && rcServerRef.current !== props.remoteControl) {
+        rcServerRef.current.close().catch(() => {});
+      }
+    };
+  }, [props.remoteControl]);
+
+  // Process remote control prompt queue — called when new prompts arrive
+  // and after each agent run completes. Uses handleSubmitRef to avoid
+  // stale closure issues.
+  const handleSubmitRef = useRef<((input: string) => Promise<void>) | undefined>(undefined);
+  const processRcQueue = useCallback(() => {
+    const cmd = rcQueueRef.current[0];
+    if (!cmd) return;
+    if (!handleSubmitRef.current) return;
+    rcQueueRef.current.shift();
+
+    const rc = props.remoteControl;
+
+    void handleSubmitRef.current(cmd.text).then(() => {
+      // Send result back to socket client
+      rc?.broadcast({ id: cmd.id, type: "result", data: { status: "done" } });
+      // Process next queued command
+      if (rcQueueRef.current.length > 0) {
+        processRcQueue();
+      }
+    });
+  }, [props.remoteControl]);
 
   const compactConversation = useCallback(
     async (messages: Message[]): Promise<Message[]> => {
@@ -1585,6 +1648,46 @@ export function App(props: AppProps) {
         return;
       }
 
+      // Handle /remote-control or /rc — activate remote control mid-session
+      if (trimmed === "/remote-control" || trimmed === "/rc") {
+        if (rcServerRef.current?.isListening) {
+          setLiveItems((prev) => [
+            ...prev,
+            {
+              kind: "info",
+              text: `Remote control already active: ${rcServerRef.current!.socketPath}`,
+              id: getId(),
+            },
+          ]);
+        } else {
+          try {
+            const { RemoteControlServer: RCS, installCleanupHandlers: installRC } =
+              await import("../core/remote-control.js");
+            const server = new RCS();
+            const socketPath = await server.start();
+            rcServerRef.current = server;
+            rcCleanupRef.current = installRC(server);
+            server.on("connection", (count: number) => setRcClientCount(count));
+            server.on("disconnection", (count: number) => setRcClientCount(count));
+            server.on("prompt", (cmd: RcPromptCommand) => {
+              rcQueueRef.current.push(cmd);
+              processRcQueue();
+            });
+            setLiveItems((prev) => [
+              ...prev,
+              { kind: "info", text: `Remote control active: ${socketPath}`, id: getId() },
+            ]);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            setLiveItems((prev) => [
+              ...prev,
+              { kind: "error", message: `Failed to start remote control: ${msg}`, id: getId() },
+            ]);
+          }
+        }
+        return;
+      }
+
       // Handle /plans — open plan pane
       if (trimmed === "/plans") {
         stdout?.write("\x1b[2J\x1b[3J\x1b[H");
@@ -1773,6 +1876,9 @@ export function App(props: AppProps) {
     [agentLoop, props.onSlashCommand, compactConversation],
   );
 
+  // Keep handleSubmitRef in sync for remote control
+  handleSubmitRef.current = handleSubmit;
+
   const handleAbort = useCallback(() => {
     if (agentLoop.isRunning) {
       agentLoop.clearQueue();
@@ -1881,6 +1987,11 @@ export function App(props: AppProps) {
       { name: "quit", aliases: ["q", "exit"], description: "Exit the agent" },
       { name: "plan", aliases: [], description: "Toggle plan mode (on/off)" },
       { name: "plans", aliases: [], description: "Open plans pane" },
+      {
+        name: "remote-control",
+        aliases: ["rc"],
+        description: "Enable remote control via Unix socket",
+      },
       ...PROMPT_COMMANDS.map((cmd) => ({
         name: cmd.name,
         aliases: cmd.aliases,
@@ -2241,6 +2352,14 @@ export function App(props: AppProps) {
         />
       ) : (
         <>
+          {/* Remote control banner */}
+          {rcServerRef.current?.isListening && (
+            <RemoteControlBanner
+              socketPath={rcServerRef.current.socketPath}
+              clientCount={rcClientCount}
+            />
+          )}
+
           {/* Content area */}
           <Box flexDirection="column" flexGrow={1} paddingRight={1}>
             {liveItems.map((item) => renderItem(item))}

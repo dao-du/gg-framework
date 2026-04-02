@@ -176,6 +176,26 @@ Plus the [Grep MCP](https://grep.dev) for searching across 1M+ public GitHub rep
 
 ---
 
+## Remote Control
+
+Control ggcoder programmatically from external agents, scripts, or orchestrators. A Unix domain socket server speaks NDJSON — send prompts, receive real-time events for everything the agent does. Human and agent share the same session.
+
+```bash
+# Start with remote control enabled
+ggcoder --rc
+
+# Or activate mid-session
+/rc
+
+# Connect from another terminal
+echo '{"id":"1","command":"prompt","text":"Fix the failing tests"}' \
+  | socat - UNIX-CONNECT:$HOME/.gg/rc-$(pgrep -f ggcoder).sock
+```
+
+See **[REMOTE-CONTROL.md](REMOTE-CONTROL.md)** for the full protocol reference, client examples (Node.js, Python, socat), troubleshooting, and ACP/[acpx](https://github.com/openclaw/acpx) integration roadmap.
+
+---
+
 ## Community
 
 - [YouTube @kenkaidoesai](https://youtube.com/@kenkaidoesai) - tutorials and demos
