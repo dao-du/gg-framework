@@ -488,6 +488,20 @@ Prompts sent while the agent is processing are queued. They'll execute in order 
 
 ## Future Roadmap
 
+### Pocket Agent / OpenClaw
+
+[Pocket Agent](https://github.com/KenKaiii/pocket-agent) is a personal AI assistant (menu bar + Telegram) with persistent memory, routines, and 40+ integrations. [OpenClaw](https://github.com/openclaw/openclaw) is an open-source multi-channel gateway (WhatsApp, Telegram, Discord, iMessage).
+
+Both can use the RC socket to delegate coding tasks to ggcoder:
+
+1. User asks from Telegram/menu bar: "Fix the auth bug in my backend"
+2. Pocket Agent (or OpenClaw) connects to `~/.gg/rc-<PID>.sock`
+3. Sends `{"id":"1","command":"prompt","text":"Fix the auth bug..."}`
+4. Streams `text_delta` events back to the chat
+5. Waits for `agent_done`, reports the result
+
+ggcoder handles the coding (file reads, edits, bash, grep). The conversational agent handles routing, memory, and channels. Clean separation.
+
 ### ACP (Agent Communication Protocol) Bridge
 
 ACP uses JSON-RPC 2.0 over stdio. Bridging to our NDJSON/Unix-socket protocol is straightforward:
